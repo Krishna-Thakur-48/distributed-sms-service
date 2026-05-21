@@ -1,0 +1,25 @@
+# IDEs and Editors
+.vscode/
+.idea/
+*.iml
+*.iws
+
+# Gemini / Antigravity IDE
+.gemini/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Java / Maven
+sms-sender-java/target/
+*.class
+*.jar
+*.war
+*.ear
+*.log
+
+# Go
+sms-store-go/sms-store-go.exe
+sms-store-go/sms-store-go
+*.out
