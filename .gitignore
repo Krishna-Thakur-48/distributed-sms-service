@@ -23,3 +23,9 @@ sms-sender-java/target/
 sms-store-go/sms-store-go.exe
 sms-store-go/sms-store-go
 *.out
+
+# H2 outbox database (runtime state, not source)
+sms-sender-java/data/
+*.mv.db
+*.lock.db
+*.trace.db

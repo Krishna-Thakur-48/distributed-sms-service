@@ -12,6 +12,7 @@ import java.time.OffsetDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 public class SmsEvent {
+    private String eventId;          // stable per-request id (the outbox row id) → consumer dedup key
     private String phoneNumber;
     private String message;
     private String status;

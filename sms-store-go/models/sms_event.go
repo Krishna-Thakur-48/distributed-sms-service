@@ -3,6 +3,7 @@ package models
 import "time"
 
 type SmsEvent struct {
+	EventId         string    `json:"eventId" bson:"eventId"`
 	PhoneNumber     string    `json:"phoneNumber" bson:"phoneNumber"`
 	Message         string    `json:"message" bson:"message"`
 	Status          string    `json:"status" bson:"status"`

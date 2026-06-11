@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Distributed SMS Service — Deck</title>
+<style>
+  @page { size: 13.333in 7.5in; margin: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root{
+    --bg:#0e1626; --bg2:#0a1120; --panel:#16213a; --panel2:#1b2842;
+    --border:#2b3a57; --text:#e8eef7; --muted:#9fb0c8; --dim:#6f819c;
+    --blue:#4d8dff; --cyan:#22d3ee; --green:#34d399; --warn:#fbbf24; --red:#f87171; --violet:#a78bfa;
+    --mono:'SFMono-Regular',Consolas,'Liberation Mono',monospace;
+    --sans:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;
+  }
+
+  body{ font-family:var(--sans); color:var(--text); background:#000; }
+
+  .slide{
+    width:13.333in; height:7.5in; position:relative; overflow:hidden;
+    background:linear-gradient(135deg,#0e1626 0%,#0a1120 100%);
+    padding:46px 56px 52px; page-break-after:always; display:flex; flex-direction:column;
+  }
+  .slide:last-child{ page-break-after:auto; }
+
+  /* header */
+  .kicker{ color:var(--cyan); font-size:12px; font-weight:800; letter-spacing:3px; text-transform:uppercase; }
+  h2.title{ font-size:30px; font-weight:750; margin-top:3px; letter-spacing:-.3px; }
+  .rule{ height:3px; width:70px; background:linear-gradient(90deg,var(--blue),var(--cyan)); border-radius:3px; margin:10px 0 14px; }
+
+  /* footer */
+  .foot{ position:absolute; left:56px; right:56px; bottom:18px; display:flex; justify-content:space-between;
+         align-items:center; font-size:11px; color:var(--dim); border-top:1px solid var(--border); padding-top:8px; }
+  .pageno{ background:var(--blue); color:#04101f; font-weight:800; border-radius:6px; padding:2px 9px; font-size:11px; }
+
+  .body{ flex:1; min-height:0; }
+
+  /* layout helpers */
+  .g2{ display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  .g2-58{ display:grid; grid-template-columns:1.25fr 1fr; gap:18px; }
+  .g3{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  .col{ display:flex; flex-direction:column; gap:12px; }
+
+  .panel{ background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }
+  .panel h3{ font-size:14px; color:#cfe0f5; margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+  .panel h3 .ic{ font-size:15px; }
+
+  p, li{ font-size:13.5px; line-height:1.5; color:var(--text); }
+  ul{ padding-left:18px; } li{ margin:3px 0; }
+  .muted{ color:var(--muted); } .sm{ font-size:12px; }
+  b,strong{ color:#fff; }
+
+  code{ font-family:var(--mono); font-size:11.5px; background:#0c1424; border:1px solid var(--border);
+        padding:1px 5px; border-radius:4px; color:#bcd3f2; }
+
+  pre{ font-family:var(--mono); font-size:11px; line-height:1.45; color:#cfe0f5;
+       background:#0a1322; border:1px solid var(--border); border-radius:8px; padding:12px 14px; white-space:pre; overflow:hidden; }
+  pre .b{ color:var(--blue); } pre .c{ color:var(--cyan); } pre .g{ color:var(--green); }
+  pre .y{ color:var(--warn); } pre .r{ color:var(--red); } pre .d{ color:var(--dim); }
+
+  table{ width:100%; border-collapse:collapse; font-size:12px; }
+  th,td{ border:1px solid var(--border); padding:6px 9px; text-align:left; vertical-align:top; }
+  th{ background:#1c2c49; color:#cfe0f5; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+  td{ color:var(--text); } tr:nth-child(even) td{ background:#121d33; }
+
+  .tag{ display:inline-block; padding:1px 8px; border-radius:11px; font-size:10px; font-weight:800; }
+  .t-ok{ background:rgba(52,211,153,.16); color:var(--green); border:1px solid var(--green); }
+  .t-open{ background:rgba(251,191,36,.14); color:var(--warn); border:1px solid var(--warn); }
+
+  .chip{ display:inline-block; background:#13203a; border:1px solid var(--border); color:#bcd3f2;
+         border-radius:20px; padding:5px 12px; font-size:12px; margin:3px 4px 0 0; font-weight:600; }
+
+  .stat{ background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:12px 14px; }
+  .stat .n{ font-size:22px; font-weight:800; } .stat .l{ font-size:11px; color:var(--muted); margin-top:2px; }
+
+  /* architecture flow (slide 3) */
+  .flow{ display:flex; align-items:center; justify-content:center; gap:2px; margin:18px 0 14px; }
+  .node2{ background:var(--panel2); border:1px solid var(--border); border-radius:11px; padding:12px 12px; text-align:center; min-width:120px; }
+  .node2 .ic{ font-size:23px; line-height:1; }
+  .node2 .nm{ font-size:14px; font-weight:750; margin-top:5px; }
+  .node2 .sub{ font-size:10.5px; color:var(--muted); margin-top:2px; }
+  .node2.hl{ border-color:var(--blue); background:#13213c; }
+  .arrow2{ display:flex; flex-direction:column; align-items:center; color:var(--cyan); font-size:20px; font-weight:700; min-width:56px; }
+  .arrow2 small{ font-size:9px; color:var(--dim); margin-top:1px; letter-spacing:.4px; text-transform:uppercase; }
+  .stripflow{ display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:7px; }
+  .stripflow .lbl{ color:var(--muted); font-size:12px; }
+  .sp{ display:inline-block; padding:3px 10px; border-radius:7px; font-size:11px; font-weight:700; border:1px solid; }
+  .sp.c{ color:var(--cyan); border-color:var(--cyan); background:rgba(34,211,238,.10); }
+  .sp.b{ color:var(--blue); border-color:var(--blue); background:rgba(77,141,255,.10); }
+  .sp.g{ color:var(--green); border-color:var(--green); background:rgba(52,211,153,.10); }
+  .sp.r{ color:var(--red); border-color:var(--red); background:rgba(248,113,113,.10); }
+  .sp.n{ color:#bcd3f2; border-color:var(--border); background:#13203a; }
+  .arrowi{ color:var(--dim); font-size:13px; }
+
+  .accent-blue{ color:var(--blue); } .accent-cyan{ color:var(--cyan); }
+  .accent-green{ color:var(--green); } .accent-warn{ color:var(--warn); } .accent-red{ color:var(--red); }
+
+  /* title slide */
+  .cover{ justify-content:center; align-items:flex-start; }
+  .cover .big{ font-size:58px; font-weight:800; line-height:1.04; letter-spacing:-1px; }
+  .cover .big span{ background:linear-gradient(90deg,var(--blue),var(--cyan)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+  .cover .lead{ font-size:18px; color:var(--muted); margin-top:14px; max-width:760px; line-height:1.5; }
+  .glow{ position:absolute; border-radius:50%; filter:blur(80px); opacity:.45; }
+  .glow.a{ width:340px; height:340px; background:#1d4ed8; right:-60px; top:-80px; }
+  .glow.b{ width:300px; height:300px; background:#0e7490; left:-90px; bottom:-90px; }
+</style>
+</head>
+<body>
+
+<!-- ════════ SLIDE 1 — COVER ════════ -->
+<section class="slide cover">
+  <div class="glow a"></div><div class="glow b"></div>
+  <div class="kicker">Technical Design Review · HLD + LLD</div>
+  <div class="big" style="margin-top:14px;">Distributed<br><span>SMS Service</span></div>
+  <div class="lead">A polyglot, event-driven messaging platform with a transactional outbox — durable acceptance, exactly-once delivery, and an operable failure model.</div>
+
+  <div style="margin-top:26px;">
+    <span class="chip">Java 21 · Spring Boot 3.2</span>
+    <span class="chip">Go</span>
+    <span class="chip">Apache Kafka</span>
+    <span class="chip">Redis</span>
+    <span class="chip">MongoDB</span>
+    <span class="chip">H2</span>
+    <span class="chip">Docker</span>
+  </div>
+
+  <div class="g3" style="margin-top:30px; max-width:760px;">
+    <div class="stat"><div class="n accent-blue">2</div><div class="l">decoupled microservices</div></div>
+    <div class="stat"><div class="n accent-cyan">exactly&#8209;once</div><div class="l">to recipient &amp; to storage</div></div>
+    <div class="stat"><div class="n accent-green">5/5</div><div class="l">failure modes resolved</div></div>
+  </div>
+
+  <div style="position:absolute; right:56px; bottom:46px; text-align:right; color:var(--muted); font-size:13px; line-height:1.8;">
+    <b style="font-size:15px;">Krishna Thakur</b><br>11 June 2026 · v1.0
+  </div>
+</section>
+
+<!-- ════════ SLIDE 2 — PROBLEM & APPROACH ════════ -->
+<section class="slide">
+  <div class="kicker">Context</div>
+  <h2 class="title">The Problem &amp; The Approach</h2>
+  <div class="rule"></div>
+  <div class="body">
+    <div class="g2">
+      <div class="panel">
+        <h3><span class="ic">⚠️</span> The naïve flow — and why it breaks</h3>
+        <pre>request <span class="d">──►</span> vendor call <span class="d">──►</span> Kafka publish <span class="d">──►</span> 200 OK
+        <span class="d">(everything on the request thread)</span></pre>
+        <ul style="margin-top:8px;">
+          <li><span class="accent-red">Event loss</span> — if Kafka is down, the publish is lost silently.</li>
+          <li><span class="accent-red">Service stalls</span> — under load the producer buffer fills and request threads block.</li>
+          <li><span class="accent-red">Duplicate SMS</span> — a retry re-runs the vendor call, messaging the user twice.</li>
+          <li><span class="accent-red">Coupling</span> — the sender fails whenever the store is slow or down.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3><span class="ic">✅</span> The principle: decouple acceptance from work</h3>
+        <pre>request <span class="d">──►</span> <span class="c">durable outbox write</span> <span class="d">──►</span> <span class="g">202 Accepted</span>
+        <span class="d">background worker does the real work later</span></pre>
+        <ul style="margin-top:8px;">
+          <li>The request path does only a <b>fast local DB write</b> — never blocks on Kafka/vendor.</li>
+          <li>A downstream outage just makes rows <b>queue</b>, then drain on recovery.</li>
+          <li>A two-step state machine + idempotency keys make delivery <b>exactly-once</b>.</li>
+          <li>Stuck messages are <b>dead-lettered</b> and replayable — never lost, never infinite.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="g3" style="margin-top:16px;">
+      <div class="stat"><div class="l accent-cyan" style="font-weight:800;font-size:12px;">GUARANTEE 1</div><div class="n" style="font-size:16px;">Durable acceptance</div><div class="l">202 means it will never be lost</div></div>
+      <div class="stat"><div class="l accent-cyan" style="font-weight:800;font-size:12px;">GUARANTEE 2</div><div class="n" style="font-size:16px;">Exactly-once to recipient</div><div class="l">no double-send on retry/crash</div></div>
+      <div class="stat"><div class="l accent-cyan" style="font-weight:800;font-size:12px;">GUARANTEE 3</div><div class="n" style="font-size:16px;">Exactly-once storage</div><div class="l">one record per request in Mongo</div></div>
+    </div>
+  </div>
+  <div class="foot"><span>Distributed SMS Service · Technical Design Review</span><span class="pageno">02</span></div>
+</section>
+
+<!-- ════════ SLIDE 3 — HLD ════════ -->
+<section class="slide">
+  <div class="kicker">High-Level Design</div>
+  <h2 class="title">System Architecture</h2>
+  <div class="rule"></div>
+  <div class="body">
+    <div class="flow">
+      <div class="node2"><div class="ic">🖥️</div><div class="nm">Client</div><div class="sub">browser / UI</div></div>
+      <div class="arrow2">→<small>http</small></div>
+      <div class="node2 hl"><div class="ic">☕</div><div class="nm">Java Sender</div><div class="sub">:8080</div></div>
+      <div class="arrow2">→<small>publish</small></div>
+      <div class="node2"><div class="ic">🔀</div><div class="nm">Kafka</div><div class="sub">sms-events-topic</div></div>
+      <div class="arrow2">→<small>consume</small></div>
+      <div class="node2 hl"><div class="ic">🐹</div><div class="nm">Go Store</div><div class="sub">:8081</div></div>
+      <div class="arrow2">→<small>upsert</small></div>
+      <div class="node2"><div class="ic">🍃</div><div class="nm">MongoDB</div><div class="sub">history</div></div>
+    </div>
+    <p class="sm muted" style="text-align:center; margin:0 0 14px;">The two services never call each other directly — Kafka is the only link. History is read back from the Go Store on <code>:8081</code>.</p>
+    <div class="panel" style="padding:13px 16px; margin-bottom:14px;">
+      <div class="stripflow">
+        <span class="lbl">Inside the Sender:</span>
+        <span class="sp r">Redis block-check</span><span class="arrowi">→</span>
+        <span class="sp n">write Outbox · H2</span><span class="arrowi">→</span>
+        <span class="lbl">worker drains</span>
+        <span class="sp c">PENDING</span><span class="arrowi">→</span>
+        <span class="sp b">SENT</span><span class="arrowi">→</span>
+        <span class="sp g">PUBLISHED</span>
+        <span class="arrowi">|</span><span class="sp r">FAILED</span>
+        <span class="arrowi">→</span><span class="sp n">Kafka publish</span>
+      </div>
+    </div>
+    <div class="g3" style="margin-top:6px;">
+      <div class="panel" style="padding:10px 14px;"><h3 style="margin-bottom:4px;"><span class="ic">☕</span> Java Sender</h3><p class="sm muted">Synchronous API. Accepts requests, runs the outbox worker, publishes events. <b>Stays fast &amp; available.</b></p></div>
+      <div class="panel" style="padding:10px 14px;"><h3 style="margin-bottom:4px;"><span class="ic">🐹</span> Go Store</h3><p class="sm muted">Async worker. Consumes events, persists history, serves queries. <b>Processes at its own pace.</b></p></div>
+      <div class="panel" style="padding:10px 14px;"><h3 style="margin-bottom:4px;"><span class="ic">🧩</span> Infra</h3><p class="sm muted"><span class="accent-red">Redis</span> blocklist · <span class="accent-warn">Kafka</span> bus · <span class="accent-green">Mongo</span> store · H2 outbox.</p></div>
+    </div>
+  </div>
+  <div class="foot"><span>Distributed SMS Service · Technical Design Review</span><span class="pageno">03</span></div>
+</section>
+
+<!-- ════════ SLIDE 4 — LLD JAVA ════════ -->
+<section class="slide">
+  <div class="kicker">Low-Level Design</div>
+  <h2 class="title">Inside the Java Sender</h2>
+  <div class="rule"></div>
+  <div class="body">
+    <div class="g2-58">
+      <div class="col">
+        <div class="panel" style="padding:12px 14px;">
+          <h3><span class="ic">🧱</span> Layered responsibilities</h3>
+          <table>
+            <tr><th>Component</th><th>Responsibility</th></tr>
+            <tr><td><code>SmsController</code></td><td>send · health · block / unblock / check</td></tr>
+            <tr><td><code>OutboxController</code></td><td>list outbox · list failed · replay</td></tr>
+            <tr><td><code>SmsServiceImpl</code></td><td>Redis check → write outbox row → 202</td></tr>
+            <tr><td><code>OutboxProcessor</code></td><td>@Scheduled worker: state machine + backoff</td></tr>
+            <tr><td><code>MockSmsVendorService</code></td><td>deterministic vendor, idempotent by key</td></tr>
+            <tr><td><code>KafkaSmsEventPublisher</code></td><td>serialize + publish (blocking, worker thread)</td></tr>
+            <tr><td><code>ApiKeyAuthFilter</code></td><td>guards the admin surface (X-API-Key)</td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="col">
+        <div class="panel">
+          <h3><span class="ic">⚡</span> Request path (synchronous)</h3>
+          <pre>POST /v1/sms/send
+  <span class="d">│</span> SISMEMBER blocked_users  <span class="r">─► blocked? 403</span>
+  <span class="d">│</span> INSERT outbox <span class="c">(PENDING, id=UUID)</span>
+  <span class="g">└─► 202 Accepted {messageId}</span>  <span class="d">≈ ms</span></pre>
+        </div>
+        <div class="panel">
+          <h3><span class="ic">🔁</span> Worker loop (every 1s)</h3>
+          <pre>PENDING <span class="d">─►</span> vendor.send(<span class="c">id</span>,…) <span class="d">─►</span> <span class="b">SENT</span>
+<span class="b">SENT</span>    <span class="d">─►</span> publish(eventId) <span class="d">─►</span> <span class="g">PUBLISHED</span>
+fail    <span class="d">─►</span> backoff 2→4→8…  <span class="d">─►</span> <span class="y">retry</span>
+10x     <span class="d">─►</span> <span class="r">FAILED</span> (dead-letter)</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>Distributed SMS Service · Technical Design Review</span><span class="pageno">04</span></div>
+</section>
+
+<!-- ════════ SLIDE 5 — LLD GO + GATEWAY ════════ -->
+<section class="slide">
+  <div class="kicker">Low-Level Design</div>
+  <h2 class="title">The Go Store &amp; the Gateway</h2>
+  <div class="rule"></div>
+  <div class="body">
+    <div class="g2">
+      <div class="col">
+        <div class="panel" style="padding:12px 14px;">
+          <h3><span class="ic">📦</span> Go packages</h3>
+          <table>
+            <tr><th>Package</th><th>Responsibility</th></tr>
+            <tr><td><code>kafka</code></td><td>consumer loop: read → unmarshal → save</td></tr>
+            <tr><td><code>services</code></td><td>Mongo upsert keyed by <code>eventId</code></td></tr>
+            <tr><td><code>handlers</code></td><td>HTTP: health, message history</td></tr>
+            <tr><td><code>models</code></td><td>shared <code>SmsEvent</code> (json+bson)</td></tr>
+            <tr><td><code>config</code></td><td>env-driven config + defaults</td></tr>
+          </table>
+        </div>
+        <div class="panel">
+          <h3><span class="ic">🔄</span> Consumer loop (goroutine)</h3>
+          <pre>for {
+  msg <span class="d">=</span> reader.ReadMessage(ctx) <span class="d">// blocks</span>
+  json.Unmarshal(msg, &amp;event)
+  svc.SaveEvent(event)  <span class="g">// upsert</span>
+}  <span class="d">// ctx cancel ─► graceful stop</span></pre>
+        </div>
+      </div>
+      <div class="col">
+        <div class="panel">
+          <h3><span class="ic">🚪</span> Demo gateway (Go reverse proxy)</h3>
+          <p class="sm">Serves the UI and routes all API traffic so the browser sees <b>one origin</b> — CORS disappears.</p>
+          <pre>/api/sender/* <span class="d">─►</span> :8080  <span class="c">(+ inject X-API-Key)</span>
+/api/store/*  <span class="d">─►</span> :8081
+/*            <span class="d">─►</span> static UI  (:3000)</pre>
+        </div>
+        <div class="panel">
+          <h3><span class="ic">🔑</span> Why the gateway matters</h3>
+          <ul>
+            <li>One origin → <b>no CORS</b>, no backend changes.</li>
+            <li>Injects the admin key → secret <b>never in browser code</b>.</li>
+            <li>Acts as the trusted edge: direct hits to :8080 are rejected.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>Distributed SMS Service · Technical Design Review</span><span class="pageno">05</span></div>
+</section>
+
+<!-- ════════ SLIDE 6 — OUTBOX ════════ -->
+<section class="slide">
+  <div class="kicker">The Centerpiece</div>
+  <h2 class="title">The Transactional Outbox</h2>
+  <div class="rule"></div>
+  <div class="body">
+    <pre style="font-size:11.5px; text-align:center;">
+   <span class="c">┌─────────┐</span>  vendor call   <span class="b">┌──────┐</span>  publish to Kafka   <span class="g">┌───────────┐</span>
+   <span class="c">│ PENDING │</span> <span class="d">─────────────►</span> <span class="b">│ SENT │</span> <span class="d">─────────────────►</span> <span class="g">│ PUBLISHED │</span>
+   <span class="c">└─────────┘</span>                <span class="b">└──────┘</span>                     <span class="g">└───────────┘</span>
+        <span class="d">│</span> vendor keeps failing  <span class="d">│</span> publish keeps failing
+        <span class="d">└──────────────► after max-attempts (10) ──────►</span> <span class="r">┌────────┐</span>
+                  with exponential backoff               <span class="r">│ FAILED │</span> replayable
+                                                          <span class="r">└────────┘</span></pre>
+    <div class="g2" style="margin-top:14px;">
+      <div class="panel">
+        <h3><span class="ic">🛡️</span> Why two steps</h3>
+        <p>Splitting <b>"call the vendor"</b> (PENDING→SENT) from <b>"publish the event"</b> (SENT→PUBLISHED) is the no-duplicate-SMS guarantee. Once a row is <span class="accent-blue">SENT</span>, a Kafka failure only retries the <i>publish</i> — <b>the vendor is never called again.</b></p>
+      </div>
+      <div class="panel">
+        <h3><span class="ic">⏱️</span> Backoff &amp; dead-letter</h3>
+        <p>Each failure doubles the delay (<code>2s→4s→8s</code> … capped 5 min) via a future <code>nextAttemptAt</code>. The ~13-min window <b>rides out a transient outage</b> instead of quarantining good messages; only a genuinely stuck row hits <span class="accent-red">FAILED</span>.</p>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>Distributed SMS Service · Technical Design Review</span><span class="pageno">06</span></div>
+</section>
+
+<!-- ════════ SLIDE 7 — FLOW + IDEMPOTENCY ════════ -->
+<section class="slide">
+  <div class="kicker">Behaviour</div>
+  <h2 class="title">End-to-End Flow &amp; Idempotency</h2>
+  <div class="rule"></div>
+  <div class="body">
+    <div class="g2">
+      <div class="panel">
+        <h3><span class="ic">🟢</span> Happy path (send → stored)</h3>
+        <pre>1  POST /v1/sms/send
+2  SISMEMBER blocked_users <span class="d">→</span> ok
+3  INSERT outbox <span class="c">PENDING</span>
+4  <span class="g">return 202</span> {messageId}      <span class="d">≈ ms</span>
+5  worker: vendor.send <span class="d">→</span> <span class="b">SENT</span>
+6  worker: publish     <span class="d">→</span> <span class="g">PUBLISHED</span>
+7  Go: consume <span class="d">→</span> upsert(eventId)
+8  Mongo: 1 document
+9  UI History <span class="d">→</span> visible</pre>
+      </div>
+      <div class="col">
+        <div class="panel">
+          <h3><span class="ic">🔗</span> The idempotency chain</h3>
+          <pre><span class="b">Vendor side:</span>  key = outbox row id
+   replay <span class="d">→</span> cached result <span class="d">→</span> <span class="g">SMS once</span>
+<span class="b">Storage side:</span> eventId = row id
+   redelivery <span class="d">→</span> upsert <span class="d">→</span> <span class="g">1 doc</span></pre>
+        </div>
+        <div class="panel" style="border-color:var(--cyan);">
+          <h3 style="color:var(--cyan);"><span class="ic">✅</span> Net guarantee</h3>
+          <p>Exactly-once <b>to the recipient</b> and exactly-once <b>in storage</b> — even though Kafka in the middle is <i>at-least-once</i> by design. The two ends are idempotent, so duplicates in the stream are harmless.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>Distributed SMS Service · Technical Design Review</span><span class="pageno">07</span></div>
+</section>
+
+<!-- ════════ SLIDE 8 — RELIABILITY (MY WORKINGS) ════════ -->
+<section class="slide">
+  <div class="kicker">My Workings · Hardening</div>
+  <h2 class="title">Failure Modes — Found &amp; Fixed</h2>
+  <div class="rule"></div>
+  <div class="body">
+    <p class="sm muted" style="margin-bottom:10px;">Each was discovered by stress-testing the pipeline (kill Kafka, crash mid-step, redeliver) and closed with a concrete change.</p>
+    <table>
+      <tr><th style="width:30%;">Failure mode</th><th>Resolution</th><th style="width:11%;">Status</th></tr>
+      <tr><td>Event lost when Kafka is down <span class="muted">(fire-and-forget on request thread)</span></td><td>Outbox pattern — durable H2 queue + async worker; request path never blocks on Kafka</td><td><span class="tag t-ok">FIXED</span></td></tr>
+      <tr><td>Duplicate SMS on retry / worker crash</td><td>Two-step state machine + idempotency key passed to the vendor</td><td><span class="tag t-ok">FIXED</span></td></tr>
+      <tr><td>Duplicate events in MongoDB <span class="muted">(at-least-once delivery)</span></td><td>Consumer upsert keyed by <code>eventId</code> + sparse unique index</td><td><span class="tag t-ok">FIXED</span></td></tr>
+      <tr><td>Poison messages retry forever</td><td>Exponential backoff + dead-letter (FAILED) + admin replay endpoint</td><td><span class="tag t-ok">FIXED</span></td></tr>
+      <tr><td>Open admin endpoints <span class="muted">(anyone could block / replay)</span></td><td>API-key filter on the admin surface + gateway key injection</td><td><span class="tag t-ok">FIXED</span></td></tr>
+    </table>
+    <div class="panel" style="margin-top:12px; border-color:var(--cyan);">
+      <p class="sm"><b class="accent-cyan">Live-validated:</b> during testing, a Kafka restart produced 3 duplicate Mongo rows — exactly the predicted at-least-once behaviour — which the <code>eventId</code> upsert then collapsed back to one. The diagnosis and the fix matched.</p>
+    </div>
+  </div>
+  <div class="foot"><span>Distributed SMS Service · Technical Design Review</span><span class="pageno">08</span></div>
+</section>
+
+<!-- ════════ SLIDE 9 — SECURITY + TECH CHOICES ════════ -->
+<section class="slide">
+  <div class="kicker">Cross-Cutting</div>
+  <h2 class="title">Security &amp; Technology Choices</h2>
+  <div class="rule"></div>
+  <div class="body">
+    <div class="g2">
+      <div class="col">
+        <div class="panel">
+          <h3><span class="ic">🔐</span> Admin authentication</h3>
+          <pre>Browser <span class="d">(no secret)</span>
+   <span class="d">└►</span> <span class="c">Gateway</span> <span class="d">(holds key, injects header)</span>
+        <span class="d">└►</span> Java filter <span class="d">─►</span> <span class="g">✅ 200</span>
+
+Attacker <span class="d">─────────►</span> Java filter <span class="d">─►</span> <span class="r">❌ 401</span></pre>
+          <p class="sm" style="margin-top:8px;"><code>X-API-Key</code> guards <code>/block/**</code> &amp; <code>/outbox/**</code>; <code>/send</code> &amp; <code>/health</code> stay public. Secret lives only in the gateway.</p>
+        </div>
+      </div>
+      <div class="col">
+        <div class="panel" style="padding:12px 14px;">
+          <h3><span class="ic">🧰</span> Why each technology</h3>
+          <table>
+            <tr><th>Tech</th><th>Used for</th><th>Why</th></tr>
+            <tr><td class="accent-red">Redis</td><td>blocklist (hot path)</td><td>in-memory, O(1) Set check</td></tr>
+            <tr><td class="accent-warn">Kafka</td><td>async event bus</td><td>durable, replayable, decouples</td></tr>
+            <tr><td class="accent-green">Mongo</td><td>event history</td><td>flexible docs, write-heavy</td></tr>
+            <tr><td>H2</td><td>outbox table</td><td>relational + transactional</td></tr>
+            <tr><td class="muted">Spring</td><td>sender</td><td>first-class Kafka/Redis</td></tr>
+            <tr><td class="muted">Go</td><td>store</td><td>goroutines: consumer + HTTP</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+    <p class="sm muted" style="margin-top:12px;">Each store is chosen for its <b>data shape and access pattern</b> — fast lookups in Redis, a transactional state machine in a relational DB, a durable bus in Kafka, a flexible append-log in Mongo.</p>
+  </div>
+  <div class="foot"><span>Distributed SMS Service · Technical Design Review</span><span class="pageno">09</span></div>
+</section>
+
+<!-- ════════ SLIDE 10 — ROADMAP + SUMMARY ════════ -->
+<section class="slide">
+  <div class="kicker">Maturity</div>
+  <h2 class="title">Known Limitations &amp; Roadmap</h2>
+  <div class="rule"></div>
+  <div class="body">
+    <div class="g2-58">
+      <div class="panel" style="padding:12px 14px;">
+        <h3><span class="ic">🧭</span> Open items — all additive, no re-architecture</h3>
+        <table>
+          <tr><th>Limitation</th><th>Planned resolution</th></tr>
+          <tr><td>Mock idempotency map in-memory</td><td>real vendor enforces it server-side</td></tr>
+          <tr><td>No client-level idempotency</td><td>client-supplied idempotency key</td></tr>
+          <tr><td>Single partition &amp; replica</td><td>3 replicas, N partitions, ISR=2</td></tr>
+          <tr><td>No producer idempotence</td><td><code>enable.idempotence</code> + <code>acks=all</code></td></tr>
+          <tr><td>Unbounded history query</td><td>pagination + index on phoneNumber</td></tr>
+          <tr><td>Shared admin key</td><td>per-seller keys + tenant isolation</td></tr>
+          <tr><td>No outbox retention</td><td>scheduled archival job</td></tr>
+        </table>
+      </div>
+      <div class="col">
+        <div class="panel" style="border-color:var(--blue);">
+          <h3 class="accent-blue"><span class="ic">🎯</span> The thread</h3>
+          <p class="sm">Start simple, then systematically stress-test: <i>what if Kafka dies? what if the worker crashes mid-step? what if a message is redelivered?</i> Each question exposed a real failure mode and led to a concrete fix.</p>
+        </div>
+        <div class="panel" style="border-color:var(--green);">
+          <h3 class="accent-green"><span class="ic">✅</span> Where it stands</h3>
+          <p class="sm">The outbox foundation, the end-to-end idempotency chain, and the public/admin split are <b>production-shaped</b>. The open items are scaling and multi-tenancy — the next layer, not dead-ends.</p>
+        </div>
+      </div>
+    </div>
+    <div style="text-align:center; margin-top:14px; color:var(--muted); font-size:13px;">
+      <b class="accent-cyan">Thank you</b> &nbsp;·&nbsp; Krishna Thakur &nbsp;·&nbsp; Distributed SMS Service &nbsp;·&nbsp; Questions welcome
+    </div>
+  </div>
+  <div class="foot"><span>Distributed SMS Service · Technical Design Review</span><span class="pageno">10</span></div>
+</section>
+
+<script>
+  // Optional deep-link / verification helper: ?slide=N isolates one slide.
+  // No query param = the full deck renders normally (and the PDF export is unaffected).
+  (function(){
+    var n = new URLSearchParams(location.search).get('slide');
+    if(!n) return;
+    document.querySelectorAll('.slide').forEach(function(s,i){
+      if(i !== (parseInt(n,10)-1)) s.style.display='none';
+    });
+  })();
+</script>
+</body>
+</html>

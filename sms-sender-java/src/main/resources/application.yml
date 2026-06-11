@@ -8,8 +8,42 @@ spring:
     redis:
       host: localhost
       port: 6379
+  datasource:
+    url: jdbc:h2:file:./data/outboxdb;AUTO_SERVER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
   kafka:
     producer:
       bootstrap-servers: localhost:9092
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      retries: 3
+      properties:
+        retry.backoff.ms: 1000
+        max.block.ms: 3000
+
+# Shared secret guarding the admin endpoints (/v1/sms/block/**, /v1/sms/outbox/**).
+# Override with the ADMIN_API_KEY env var in any real environment.
+admin:
+  api-key: ${ADMIN_API_KEY:demo-secret-key-change-me}
+
+# Outbox background worker tuning
+outbox:
+  poll-interval-ms: 1000      # how often the worker scans for due rows
+  max-attempts: 10            # failures at one step before a row is dead-lettered (FAILED)
+  backoff-base-ms: 2000       # first retry delay; doubles each attempt (2s, 4s, 8s, ...)
+  backoff-max-ms: 300000      # cap on the retry delay (5 min)
+  # With these defaults a row only dead-letters after the backoff window spans
+  # ~13 min of continuous failure, so a transient Kafka outage is ridden out
+  # rather than wrongly quarantined. Raise max-attempts for a longer window.

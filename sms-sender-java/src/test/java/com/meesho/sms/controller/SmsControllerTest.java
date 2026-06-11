@@ -31,12 +31,12 @@ public class SmsControllerTest {
     private ObjectMapper objectMapper;
 
     @Test
-    void sendSms_ValidRequest_ReturnsSuccess() throws Exception {
+    void sendSms_ValidRequest_ReturnsAccepted() throws Exception {
         SmsRequest request = new SmsRequest("+1234567890", "Test message");
         SmsResponse response = SmsResponse.builder()
-                .status("SUCCESS")
+                .status("ACCEPTED")
                 .messageId("123-abc")
-                .message("SMS sent successfully to +1234567890")
+                .message("SMS request accepted for processing")
                 .build();
 
         Mockito.when(smsService.sendSms(any(SmsRequest.class))).thenReturn(response);
@@ -44,8 +44,8 @@ public class SmsControllerTest {
         mockMvc.perform(post("/v1/sms/send")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("SUCCESS"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.status").value("ACCEPTED"))
                 .andExpect(jsonPath("$.messageId").value("123-abc"));
     }
 

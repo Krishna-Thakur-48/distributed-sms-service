@@ -2,12 +2,11 @@ package com.meesho.sms.service;
 
 import com.meesho.sms.dto.SmsRequest;
 import com.meesho.sms.dto.SmsResponse;
-import com.meesho.sms.event.SmsEvent;
-import com.meesho.sms.event.SmsEventPublisher;
 import com.meesho.sms.exception.BlockedUserException;
+import com.meesho.sms.outbox.OutboxEvent;
+import com.meesho.sms.outbox.OutboxRepository;
+import com.meesho.sms.outbox.OutboxStatus;
 import com.meesho.sms.service.impl.SmsServiceImpl;
-import com.meesho.sms.vendor.SmsVendorService;
-import com.meesho.sms.vendor.VendorResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,82 +30,50 @@ public class SmsServiceTest {
     private SetOperations<String, String> setOperations;
 
     @Mock
-    private SmsVendorService vendorService;
-
-    @Mock
-    private SmsEventPublisher eventPublisher;
+    private OutboxRepository outboxRepository;
 
     @Captor
-    private ArgumentCaptor<SmsEvent> eventCaptor;
+    private ArgumentCaptor<OutboxEvent> outboxCaptor;
 
     private SmsService smsService;
 
     @BeforeEach
     void setUp() {
-        smsService = new SmsServiceImpl(redisTemplate, vendorService, eventPublisher);
+        smsService = new SmsServiceImpl(redisTemplate, outboxRepository);
     }
 
     @Test
-    void sendSms_WhenNotBlockedAndVendorSuccess_PublishesSuccessEvent() {
+    void sendSms_WhenNotBlocked_AcceptsAndWritesPendingOutboxRow() {
         SmsRequest request = new SmsRequest("+1234567890", "Test message");
         when(redisTemplate.opsForSet()).thenReturn(setOperations);
         when(setOperations.isMember("blocked_users", "+1234567890")).thenReturn(false);
 
-        VendorResponse vendorResponse = VendorResponse.builder()
-                .success(true)
-                .vendorMessageId("VND-123")
-                .build();
-        when(vendorService.send("+1234567890", "Test message")).thenReturn(vendorResponse);
-
         SmsResponse response = smsService.sendSms(request);
 
+        // The request is accepted, not yet delivered.
         assertNotNull(response);
-        assertEquals("SUCCESS", response.getStatus());
+        assertEquals("ACCEPTED", response.getStatus());
+        assertNotNull(response.getMessageId()); // the outbox row id
 
-        verify(eventPublisher).publish(eventCaptor.capture());
-        SmsEvent publishedEvent = eventCaptor.getValue();
-        assertEquals("+1234567890", publishedEvent.getPhoneNumber());
-        assertEquals("SUCCESS", publishedEvent.getStatus());
-        assertEquals("VND-123", publishedEvent.getVendorMessageId());
-        assertNull(publishedEvent.getErrorReason());
-        assertNotNull(publishedEvent.getTimestamp());
+        // A PENDING row is persisted, carrying the request details.
+        verify(outboxRepository).save(outboxCaptor.capture());
+        OutboxEvent saved = outboxCaptor.getValue();
+        assertEquals("+1234567890", saved.getPhoneNumber());
+        assertEquals("Test message", saved.getMessage());
+        assertEquals(OutboxStatus.PENDING, saved.getStatus());
+        assertEquals(response.getMessageId(), saved.getId());
+        assertNotNull(saved.getCreatedAt());
     }
 
     @Test
-    void sendSms_WhenNotBlockedAndVendorFails_PublishesFailedEvent() {
-        SmsRequest request = new SmsRequest("+9999999999", "Test message");
-        when(redisTemplate.opsForSet()).thenReturn(setOperations);
-        when(setOperations.isMember("blocked_users", "+9999999999")).thenReturn(false);
-
-        VendorResponse vendorResponse = VendorResponse.builder()
-                .success(false)
-                .errorReason("Carrier rejected message")
-                .build();
-        when(vendorService.send("+9999999999", "Test message")).thenReturn(vendorResponse);
-
-        SmsResponse response = smsService.sendSms(request);
-
-        assertNotNull(response);
-        assertEquals("FAILED", response.getStatus());
-
-        verify(eventPublisher).publish(eventCaptor.capture());
-        SmsEvent publishedEvent = eventCaptor.getValue();
-        assertEquals("+9999999999", publishedEvent.getPhoneNumber());
-        assertEquals("FAILED", publishedEvent.getStatus());
-        assertNull(publishedEvent.getVendorMessageId());
-        assertEquals("Carrier rejected message", publishedEvent.getErrorReason());
-        assertNotNull(publishedEvent.getTimestamp());
-    }
-
-    @Test
-    void sendSms_WhenBlocked_ThrowsExceptionAndDoesNotPublish() {
+    void sendSms_WhenBlocked_ThrowsExceptionAndWritesNothing() {
         SmsRequest request = new SmsRequest("+1234567890", "Test message");
         when(redisTemplate.opsForSet()).thenReturn(setOperations);
         when(setOperations.isMember("blocked_users", "+1234567890")).thenReturn(true);
 
         assertThrows(BlockedUserException.class, () -> smsService.sendSms(request));
-        
-        verifyNoInteractions(vendorService);
-        verifyNoInteractions(eventPublisher);
+
+        // Blocked numbers never reach the outbox.
+        verifyNoInteractions(outboxRepository);
     }
 }

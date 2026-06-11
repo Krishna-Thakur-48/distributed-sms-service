@@ -3,11 +3,13 @@ package services
 import (
 	"context"
 	"log"
+	"time"
 
 	"sms-store-go/models"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type SmsService interface {
@@ -20,15 +22,37 @@ type smsServiceImpl struct {
 }
 
 func NewSmsService(db *mongo.Database) SmsService {
+	collection := db.Collection("sms_events")
+	ensureIndexes(collection)
 	return &smsServiceImpl{
-		collection: db.Collection("sms_events"),
+		collection: collection,
 	}
 }
 
+// ensureIndexes creates a sparse, unique index on eventId. This is the safety
+// net behind the upsert: even under redelivery or concurrent consumers, the
+// same eventId can never produce two documents. Sparse means pre-existing rows
+// without an eventId don't break index creation.
+func ensureIndexes(collection *mongo.Collection) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	index := mongo.IndexModel{
+		Keys:    bson.D{{Key: "eventId", Value: 1}},
+		Options: options.Index().SetUnique(true).SetSparse(true).SetName("uniq_eventId"),
+	}
+	if _, err := collection.Indexes().CreateOne(ctx, index); err != nil {
+		log.Printf("Failed to ensure uniq_eventId index: %v\n", err)
+	}
+}
+
+// SaveEvent is idempotent: it upserts keyed by eventId, so replaying the same
+// event from Kafka (at-least-once delivery) always converges to one document.
 func (s *smsServiceImpl) SaveEvent(ctx context.Context, event *models.SmsEvent) error {
-	_, err := s.collection.InsertOne(ctx, event)
-	if err != nil {
-		log.Printf("Failed to insert event for %s: %v\n", event.PhoneNumber, err)
+	filter := bson.M{"eventId": event.EventId}
+	opts := options.Replace().SetUpsert(true)
+	if _, err := s.collection.ReplaceOne(ctx, filter, event, opts); err != nil {
+		log.Printf("Failed to upsert event %s for %s: %v\n", event.EventId, event.PhoneNumber, err)
 		return err
 	}
 	return nil

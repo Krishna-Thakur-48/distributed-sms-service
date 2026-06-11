@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Distributed SMS Service — High-Level Design</title>
+<style>
+  @page { size: A4; margin: 16mm 16mm 18mm 16mm; }
+
+  * { box-sizing: border-box; }
+
+  html { font-size: 10.5pt; }
+
+  body {
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #1a1f29;
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  h1, h2, h3, h4 { color: #0b2545; line-height: 1.25; }
+
+  h1 {
+    font-size: 20pt;
+    border-bottom: 3px solid #1f6feb;
+    padding-bottom: 6px;
+    margin: 0 0 14px 0;
+    page-break-before: always;
+  }
+  h1.no-break { page-break-before: avoid; }
+
+  h2 { font-size: 14pt; margin-top: 22px; border-bottom: 1px solid #d0d7de; padding-bottom: 3px; }
+  h3 { font-size: 11.5pt; margin-top: 16px; color: #134074; }
+  h4 { font-size: 10.5pt; margin-top: 12px; color: #3a4a5e; }
+
+  p { margin: 7px 0; }
+  ul, ol { margin: 7px 0; padding-left: 22px; }
+  li { margin: 3px 0; }
+
+  code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    background: #f0f3f7;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 9pt;
+    color: #1c2b3a;
+  }
+
+  pre {
+    background: #0d1726;
+    color: #d7e3f4;
+    padding: 12px 14px;
+    border-radius: 6px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-size: 8.3pt;
+    line-height: 1.4;
+    overflow-x: auto;
+    white-space: pre;
+    page-break-inside: avoid;
+  }
+  pre.diagram { background: #f7f9fc; color: #14304d; border: 1px solid #cfdae8; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0;
+    font-size: 9pt;
+    page-break-inside: avoid;
+  }
+  th, td { border: 1px solid #cfd7e0; padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: #eef3f9; color: #0b2545; font-weight: 600; }
+  tr:nth-child(even) td { background: #fafbfd; }
+
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 8pt; font-weight: 700; }
+  .ok    { background: #d6f5e0; color: #096a30; }
+  .open  { background: #fdeccb; color: #8a5a00; }
+
+  .callout {
+    border-left: 4px solid #1f6feb;
+    background: #f2f7fe;
+    padding: 8px 14px;
+    margin: 12px 0;
+    border-radius: 0 6px 6px 0;
+    page-break-inside: avoid;
+  }
+  .callout.warn { border-left-color: #d29922; background: #fdf7ea; }
+
+  /* Cover */
+  .cover { text-align: center; padding-top: 90px; page-break-after: always; }
+  .cover .kicker { color: #1f6feb; font-weight: 700; letter-spacing: 3px; font-size: 11pt; text-transform: uppercase; }
+  .cover h1 { font-size: 34pt; border: none; page-break-before: avoid; margin: 18px 0 6px; }
+  .cover .sub { font-size: 14pt; color: #51606f; margin-bottom: 60px; }
+  .cover .meta { font-size: 11pt; color: #3a4a5e; line-height: 2; }
+  .cover .stack { margin-top: 60px; font-size: 9.5pt; color: #6a7686; }
+
+  /* TOC */
+  .toc { page-break-after: always; }
+  .toc ol { font-size: 11pt; line-height: 1.9; }
+
+  .small { font-size: 8.5pt; color: #6a7686; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ COVER ═══════════════════ -->
+<div class="cover">
+  <div class="kicker">High-Level Design</div>
+  <h1>Distributed SMS Service</h1>
+  <div class="sub">A polyglot, event-driven messaging platform with a transactional outbox</div>
+  <div class="meta">
+    <strong>Author:</strong> Krishna Thakur<br>
+    <strong>Date:</strong> 11 June 2026<br>
+    <strong>Version:</strong> 1.0
+  </div>
+  <div class="stack">
+    Java 21 · Spring Boot 3.2 · Go · Kafka · Redis · MongoDB · H2 · Docker
+  </div>
+</div>
+
+<!-- ═══════════════════ TOC ═══════════════════ -->
+<div class="toc">
+  <h1 class="no-break">Table of Contents</h1>
+  <ol>
+    <li>Introduction &amp; Overview</li>
+    <li>Goals &amp; Non-Goals</li>
+    <li>System Architecture</li>
+    <li>Component Design</li>
+    <li>End-to-End Data Flow</li>
+    <li>The Outbox Pattern</li>
+    <li>Reliability &amp; Idempotency</li>
+    <li>Data Model</li>
+    <li>Security</li>
+    <li>Technology Choices &amp; Rationale</li>
+    <li>API Reference</li>
+    <li>Configuration Reference</li>
+    <li>Deployment</li>
+    <li>Known Limitations &amp; Roadmap</li>
+    <li>Appendix &amp; Glossary</li>
+  </ol>
+</div>
+
+<!-- ═══════════════════ 1 ═══════════════════ -->
+<h1>1. Introduction &amp; Overview</h1>
+<p>
+  The Distributed SMS Service is a polyglot, event-driven platform that accepts SMS-send requests,
+  delivers them to a vendor, and durably records every outcome. It is composed of two independently
+  deployable microservices that never call each other directly — they communicate asynchronously
+  through a Kafka topic.
+</p>
+<p>
+  The central design principle is <strong>decoupling acceptance from work</strong>: a request is
+  durably accepted and acknowledged in milliseconds, while the actual vendor call and event
+  publication happen in the background. This makes the system resilient to downstream outages and
+  guarantees that each recipient is messaged exactly once.
+</p>
+
+<h2>1.1 At a glance</h2>
+<table>
+  <tr><th>Service</th><th>Language / Stack</th><th>Role</th><th>Port</th></tr>
+  <tr><td>SMS Sender</td><td>Java 21, Spring Boot 3.2</td><td>Synchronous API; accepts requests, runs the outbox worker, publishes events</td><td>8080</td></tr>
+  <tr><td>SMS Store</td><td>Go (net/http, segmentio/kafka-go)</td><td>Async worker; consumes events, persists history, serves queries</td><td>8081</td></tr>
+  <tr><td>Demo Gateway</td><td>Go (stdlib reverse proxy)</td><td>Serves the UI, routes API calls, injects the admin key</td><td>3000</td></tr>
+</table>
+
+<!-- ═══════════════════ 2 ═══════════════════ -->
+<h1>2. Goals &amp; Non-Goals</h1>
+<h2>2.1 Goals</h2>
+<ul>
+  <li><strong>Durable acceptance</strong> — once a request returns <code>202 Accepted</code>, it will never be lost.</li>
+  <li><strong>Exactly-once to the recipient</strong> — a retry or crash must never send the same SMS twice.</li>
+  <li><strong>Exactly-once storage</strong> — the history store must hold one record per request regardless of redelivery.</li>
+  <li><strong>Resilience to outages</strong> — a Kafka or store outage must not bring down the request path.</li>
+  <li><strong>Operability</strong> — stuck messages are quarantined and replayable, not lost or infinitely retried.</li>
+  <li><strong>Protected admin surface</strong> — privileged operations require authentication.</li>
+</ul>
+<h2>2.2 Non-Goals (for this iteration)</h2>
+<ul>
+  <li>Real vendor integration (a deterministic mock vendor stands in).</li>
+  <li>Multi-tenancy / per-seller isolation (single-operator model for now).</li>
+  <li>High-availability infrastructure (single-broker Kafka, single-node stores).</li>
+  <li>User-facing authentication (admin uses a shared API key; see §14).</li>
+</ul>
+
+<!-- ═══════════════════ 3 ═══════════════════ -->
+<h1>3. System Architecture</h1>
+<pre class="diagram">
+                          ┌──────────────────────────────────────────┐
+                          │             JAVA SMS SENDER  :8080         │
+   Client / UI            │                                            │
+   (Browser) ──HTTP──►    │  Controller ─► Redis block check           │
+        │                 │       │                                    │
+        │                 │       ▼                                    │
+        │                 │  Outbox (H2)  ◄── two-step worker          │
+        │                 │   PENDING ─► SENT ─► PUBLISHED ─► FAILED    │
+        │                 │       │                  │                 │
+        │                 │       │ vendor call      │ publish         │
+        │                 │       ▼                  ▼                 │
+        │                 │  Mock Vendor        Kafka Producer         │
+        │                 └───────────────────────────┬────────────────┘
+        │                                              │
+        │                                       ┌──────▼───────┐
+        │                                       │    KAFKA     │  sms-events-topic
+        │                                       └──────┬───────┘
+        │                                              │  consumer group: sms-store-group
+        │                 ┌────────────────────────────▼────────────────┐
+        │                 │              GO SMS STORE  :8081              │
+        └──HTTP (history)─┤  Kafka Consumer ─► upsert(eventId) ─► MongoDB │
+                          │  REST: GET /v1/user/{phone}/messages          │
+                          └───────────────────────────────────────────────┘
+
+   Infrastructure:  Redis (blocklist) · Kafka + Zookeeper (event bus) · MongoDB (history) · H2 (outbox, embedded)
+</pre>
+
+<h2>3.1 Why two services</h2>
+<p>
+  The sender is <strong>synchronous and user-facing</strong> — it must respond fast and stay available.
+  The store is <strong>asynchronous and write-heavy</strong> — it processes at its own pace. Splitting
+  them lets each scale and fail independently. Kafka is the durable buffer between them, so the sender
+  never blocks on, or fails because of, the store.
+</p>
+
+<!-- ═══════════════════ 4 ═══════════════════ -->
+<h1>4. Component Design</h1>
+
+<h2>4.1 Java SMS Sender</h2>
+<table>
+  <tr><th>Layer</th><th>Responsibility</th></tr>
+  <tr><td><code>SmsController</code></td><td>REST endpoints: send, health, block/unblock/check</td></tr>
+  <tr><td><code>OutboxController</code></td><td>Admin: list outbox, list failed, replay</td></tr>
+  <tr><td><code>SmsServiceImpl</code></td><td>Redis block check; writes the outbox row; returns 202</td></tr>
+  <tr><td><code>OutboxProcessor</code></td><td>Scheduled worker; drives PENDING→SENT→PUBLISHED with backoff + dead-letter</td></tr>
+  <tr><td><code>MockSmsVendorService</code></td><td>Deterministic vendor; idempotent by key</td></tr>
+  <tr><td><code>KafkaSmsEventPublisher</code></td><td>Serializes the event and publishes synchronously (worker thread)</td></tr>
+  <tr><td><code>ApiKeyAuthFilter</code></td><td>Guards the admin surface with an API key</td></tr>
+</table>
+
+<h2>4.2 Go SMS Store</h2>
+<table>
+  <tr><th>Package</th><th>Responsibility</th></tr>
+  <tr><td><code>kafka</code></td><td>Consumer loop; reads the topic, unmarshals, hands to the service</td></tr>
+  <tr><td><code>services</code></td><td>MongoDB persistence; idempotent upsert keyed by <code>eventId</code></td></tr>
+  <tr><td><code>handlers</code></td><td>HTTP handlers for health and message history</td></tr>
+  <tr><td><code>models</code></td><td>Shared <code>SmsEvent</code> struct (json + bson tags)</td></tr>
+  <tr><td><code>config</code></td><td>Env-driven configuration with sensible defaults</td></tr>
+</table>
+
+<h2>4.3 Demo Gateway (Reverse Proxy)</h2>
+<p>
+  A small Go reverse proxy serves the single-page UI and routes <code>/api/sender/*</code> to the Java
+  service and <code>/api/store/*</code> to the Go service. Because the browser only ever sees one origin
+  (<code>:3000</code>), CORS is avoided entirely. The proxy also <strong>injects the admin API key</strong>
+  on sender-bound traffic, acting as a trusted gateway so the secret never lives in client code.
+</p>
+
+<!-- ═══════════════════ 5 ═══════════════════ -->
+<h1>5. End-to-End Data Flow</h1>
+<h2>5.1 Happy path (send → stored)</h2>
+<pre class="diagram">
+ 1. Client → POST /v1/sms/send {phoneNumber, message}
+ 2. Sender: SISMEMBER blocked_users → not blocked
+ 3. Sender: INSERT outbox row (status=PENDING, id=UUID)
+ 4. Sender: return 202 Accepted {status:"ACCEPTED", messageId:UUID}      ◄── fast, durable
+ 5. Worker (≤1s later): PENDING row → vendor.send(id, phone, msg) → SUCCESS
+ 6. Worker: UPDATE row status=SENT, vendorMessageId, attempts=0
+ 7. Worker (same tick): SENT row → publish to Kafka (blocking, 5s ack)
+ 8. Worker: UPDATE row status=PUBLISHED
+ 9. Go: ReadMessage → unmarshal SmsEvent
+10. Go: ReplaceOne(filter={eventId}, upsert=true) → MongoDB
+11. UI History: GET /v1/user/{phone}/messages → event visible
+</pre>
+<h2>5.2 Blocked path</h2>
+<pre class="diagram">
+ 1. Client → POST /v1/sms/send
+ 2. Sender: SISMEMBER blocked_users → BLOCKED
+ 3. Sender: throw BlockedUserException → 403 Forbidden     ◄── no outbox row, no SMS
+</pre>
+
+<!-- ═══════════════════ 6 ═══════════════════ -->
+<h1>6. The Outbox Pattern</h1>
+<p>
+  The outbox is the heart of the design. Rather than calling the vendor and publishing to Kafka on the
+  request thread, the sender writes a durable row to a local relational table and returns. A background
+  worker then drives that row through a state machine.
+</p>
+
+<h2>6.1 State machine</h2>
+<pre class="diagram">
+   ┌─────────┐   vendor call    ┌──────┐   publish to Kafka   ┌───────────┐
+   │ PENDING │ ───────────────► │ SENT │ ───────────────────► │ PUBLISHED │ (terminal)
+   └─────────┘                  └──────┘                      └───────────┘
+        │                           │
+        │ vendor keeps failing      │ publish keeps failing
+        ▼                           ▼
+   (backoff retry)            (backoff retry)
+        │                           │
+        └───────────► after max-attempts ──────────► ┌────────┐
+                                                      │ FAILED │ (dead-letter, replayable)
+                                                      └────────┘
+</pre>
+
+<h2>6.2 Why two steps</h2>
+<p>
+  Splitting "call the vendor" (PENDING→SENT) from "publish the event" (SENT→PUBLISHED) is what
+  guarantees no duplicate SMS. Once a row is <code>SENT</code>, a Kafka failure only ever retries the
+  <em>publish</em> step — the vendor is never contacted again.
+</p>
+
+<h2>6.3 Backoff &amp; dead-letter</h2>
+<p>
+  Each failure doubles the retry delay (2s → 4s → 8s … capped at 5 min) by stamping a future
+  <code>nextAttemptAt</code>; the worker only picks up rows whose backoff has elapsed. After
+  <code>max-attempts</code> (10) the row becomes <code>FAILED</code> and the worker stops touching it.
+  The long backoff window (~13 min of continuous failure) means a transient Kafka outage is ridden out
+  rather than wrongly quarantined.
+</p>
+
+<div class="callout">
+  <strong>Key property:</strong> the request thread does only a fast local DB write. A Kafka or vendor
+  outage causes rows to queue in H2 — the service stays responsive and drains automatically on recovery.
+</div>
+
+<!-- ═══════════════════ 7 ═══════════════════ -->
+<h1>7. Reliability &amp; Idempotency</h1>
+<p>The system was stress-tested against concrete failure modes. Each exposed a real problem and a fix.</p>
+
+<table>
+  <tr><th>Failure mode</th><th>Resolution</th><th>Status</th></tr>
+  <tr><td>Event lost when Kafka is down (fire-and-forget on request thread)</td><td>Outbox pattern — durable H2 queue + async worker; service never blocks on Kafka</td><td><span class="tag ok">FIXED</span></td></tr>
+  <tr><td>Duplicate SMS on worker crash/retry</td><td>Two-step state machine + idempotency key passed to the vendor</td><td><span class="tag ok">FIXED</span></td></tr>
+  <tr><td>Duplicate events in MongoDB (at-least-once delivery)</td><td>Consumer upsert keyed by <code>eventId</code> + sparse unique index</td><td><span class="tag ok">FIXED</span></td></tr>
+  <tr><td>Poison messages retry forever</td><td>Exponential backoff + dead-letter (FAILED) + admin replay</td><td><span class="tag ok">FIXED</span></td></tr>
+  <tr><td>Open admin endpoints</td><td>API-key filter + gateway injection</td><td><span class="tag ok">FIXED</span></td></tr>
+</table>
+
+<h2>7.1 The idempotency chain</h2>
+<pre class="diagram">
+  Vendor side:    idempotency key = outbox row id
+                  → vendor returns cached result on replay → recipient messaged ONCE
+
+  Storage side:   eventId = outbox row id (carried in the Kafka event)
+                  → consumer upserts on eventId → MongoDB converges to ONE document
+
+  Net guarantee:  exactly-once to the recipient AND exactly-once in storage,
+                  even though Kafka in the middle is at-least-once by design.
+</pre>
+
+<div class="callout warn">
+  <strong>The crash window:</strong> the vendor call and the SENT write are not atomic. If the worker
+  crashes between them, the row is still PENDING and the vendor would be called again on restart — which
+  is exactly why the idempotency key exists: the vendor dedups on it, so even that window cannot
+  double-send.
+</div>
+
+<!-- ═══════════════════ 8 ═══════════════════ -->
+<h1>8. Data Model</h1>
+
+<h2>8.1 Outbox row (H2 — <code>outbox_events</code>)</h2>
+<table>
+  <tr><th>Column</th><th>Type</th><th>Purpose</th></tr>
+  <tr><td>id</td><td>VARCHAR (PK)</td><td>UUID; also the idempotency key &amp; event id</td></tr>
+  <tr><td>phoneNumber</td><td>VARCHAR</td><td>Recipient</td></tr>
+  <tr><td>message</td><td>VARCHAR(1000)</td><td>Body</td></tr>
+  <tr><td>status</td><td>ENUM</td><td>PENDING / SENT / PUBLISHED / FAILED</td></tr>
+  <tr><td>vendorStatus</td><td>VARCHAR</td><td>SUCCESS / FAILED (set at SENT)</td></tr>
+  <tr><td>vendorMessageId</td><td>VARCHAR</td><td>Vendor receipt id</td></tr>
+  <tr><td>errorReason</td><td>VARCHAR</td><td>Vendor business error</td></tr>
+  <tr><td>attempts</td><td>INT</td><td>Failures at the current step</td></tr>
+  <tr><td>nextAttemptAt</td><td>TIMESTAMP</td><td>Backoff gate — earliest eligible time</td></tr>
+  <tr><td>lastError</td><td>VARCHAR(500)</td><td>Last infrastructure failure (for inspection)</td></tr>
+  <tr><td>createdAt / updatedAt</td><td>TIMESTAMP</td><td>Lifecycle timestamps</td></tr>
+</table>
+
+<h2>8.2 Event on the wire / MongoDB document (<code>sms_events</code>)</h2>
+<pre>{
+  "eventId":         "c42490c2-ecd1-4bb6-ada2-2b9bfd378fe8",   // dedup key
+  "phoneNumber":     "8888888888",
+  "message":         "Hello there",
+  "status":          "SUCCESS",
+  "vendorMessageId": "VND-7f3a...",
+  "errorReason":     null,
+  "timestamp":       "2026-06-11T14:22:37+05:30"
+}</pre>
+<p class="small">Unique sparse index on <code>eventId</code> enforces one document per request.</p>
+
+<h2>8.3 Redis</h2>
+<p>A single Set, <code>blocked_users</code>, holding blocked phone numbers. Checked with <code>SISMEMBER</code> (O(1)) on every send.</p>
+
+<!-- ═══════════════════ 9 ═══════════════════ -->
+<h1>9. Security</h1>
+<p>
+  Admin endpoints (<code>/v1/sms/block/**</code> and <code>/v1/sms/outbox/**</code>) require an
+  <code>X-API-Key</code> header validated by a Spring <code>OncePerRequestFilter</code>. Missing or
+  invalid → <code>401</code>. Public endpoints (<code>/send</code>, <code>/health</code>) are open.
+</p>
+<pre class="diagram">
+  Browser (no secret) ──► Proxy/Gateway (holds key, injects X-API-Key) ──► Java filter ──► ✅
+  Attacker ───────────────────────────────────────────────────────────► Java filter ──► ❌ 401
+</pre>
+<p>
+  The secret lives only in the gateway, never in browser code. This is correct for an internal operator;
+  the production path is per-seller keys or JWT/OAuth2 with roles (see §14).
+</p>
+
+<!-- ═══════════════════ 10 ═══════════════════ -->
+<h1>10. Technology Choices &amp; Rationale</h1>
+<table>
+  <tr><th>Technology</th><th>Used for</th><th>Why this tool</th></tr>
+  <tr><td>Redis</td><td>Blocklist (hot path)</td><td>In-memory, sub-ms; native Set type fits "is this number blocked?"</td></tr>
+  <tr><td>Kafka</td><td>Async event bus</td><td>Durable, replayable, decouples services; consumer groups for scale</td></tr>
+  <tr><td>MongoDB</td><td>Event history</td><td>Flexible JSON documents; write-heavy append/lookup workload</td></tr>
+  <tr><td>H2 (embedded)</td><td>Outbox table</td><td>Relational + transactional state machine; zero extra infra; Postgres-swappable</td></tr>
+  <tr><td>Zookeeper</td><td>Kafka coordination</td><td>Required by this Kafka version; not used directly by our code</td></tr>
+  <tr><td>Spring Boot (Java 21)</td><td>Sender</td><td>First-class Kafka/Redis/validation; LTS runtime</td></tr>
+  <tr><td>Go</td><td>Store</td><td>Lightweight concurrency (goroutines) for the consumer + HTTP server</td></tr>
+</table>
+
+<!-- ═══════════════════ 11 ═══════════════════ -->
+<h1>11. API Reference</h1>
+<h2>11.1 Java Sender (:8080)</h2>
+<table>
+  <tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr>
+  <tr><td>POST</td><td>/v1/sms/send</td><td>public</td><td>Accept an SMS request → 202 Accepted</td></tr>
+  <tr><td>GET</td><td>/v1/sms/health</td><td>public</td><td>Liveness</td></tr>
+  <tr><td>GET</td><td>/v1/sms/block/{phone}</td><td>key</td><td>Check if blocked</td></tr>
+  <tr><td>POST</td><td>/v1/sms/block/{phone}</td><td>key</td><td>Block a number</td></tr>
+  <tr><td>DELETE</td><td>/v1/sms/block/{phone}</td><td>key</td><td>Unblock a number</td></tr>
+  <tr><td>GET</td><td>/v1/sms/outbox</td><td>key</td><td>List recent outbox rows (monitor)</td></tr>
+  <tr><td>GET</td><td>/v1/sms/outbox/failed</td><td>key</td><td>List dead-lettered rows</td></tr>
+  <tr><td>POST</td><td>/v1/sms/outbox/{id}/replay</td><td>key</td><td>Requeue a FAILED row</td></tr>
+</table>
+<h2>11.2 Go Store (:8081)</h2>
+<table>
+  <tr><th>Method</th><th>Path</th><th>Description</th></tr>
+  <tr><td>GET</td><td>/health</td><td>Liveness</td></tr>
+  <tr><td>GET</td><td>/v1/user/{phone}/messages</td><td>All stored events for a number</td></tr>
+</table>
+
+<!-- ═══════════════════ 12 ═══════════════════ -->
+<h1>12. Configuration Reference</h1>
+<table>
+  <tr><th>Setting</th><th>Default</th><th>Meaning</th></tr>
+  <tr><td>outbox.poll-interval-ms</td><td>1000</td><td>Worker scan cadence</td></tr>
+  <tr><td>outbox.max-attempts</td><td>10</td><td>Failures before dead-letter</td></tr>
+  <tr><td>outbox.backoff-base-ms</td><td>2000</td><td>First retry delay (doubles each attempt)</td></tr>
+  <tr><td>outbox.backoff-max-ms</td><td>300000</td><td>Retry-delay cap (5 min)</td></tr>
+  <tr><td>admin.api-key</td><td>env ADMIN_API_KEY</td><td>Shared admin secret</td></tr>
+  <tr><td>kafka.producer.retries</td><td>3</td><td>Producer auto-retry on transient failure</td></tr>
+  <tr><td>kafka.producer.max.block.ms</td><td>3000</td><td>Max time send() blocks when buffer is full</td></tr>
+  <tr><td>KAFKA_TOPIC</td><td>sms-events-topic</td><td>Topic name (both services)</td></tr>
+  <tr><td>GroupID (Go)</td><td>sms-store-group</td><td>Consumer group for offset tracking</td></tr>
+</table>
+
+<!-- ═══════════════════ 13 ═══════════════════ -->
+<h1>13. Deployment</h1>
+<h2>13.1 Demo topology</h2>
+<p>
+  Infrastructure (Kafka, Zookeeper, MongoDB, Redis) runs via <code>docker-compose</code>. The Java and Go
+  services and the proxy run directly so logs and restarts are visible during the demo.
+</p>
+<h2>13.2 Production topology</h2>
+<ul>
+  <li>All components containerized (services include their own runtime via multi-stage Dockerfiles).</li>
+  <li>Services address dependencies by container/DNS name, not <code>localhost</code>.</li>
+  <li>Orchestrated by Kubernetes for auto-restart, horizontal scaling, and zero-downtime rolling deploys.</li>
+  <li>Kafka: 3 brokers, 3 replicas, multiple partitions, <code>acks=all</code> + idempotent producer.</li>
+  <li>H2 → managed Postgres; secrets via a secret manager, not config files.</li>
+</ul>
+
+<!-- ═══════════════════ 14 ═══════════════════ -->
+<h1>14. Known Limitations &amp; Roadmap</h1>
+<table>
+  <tr><th>Limitation</th><th>Impact</th><th>Planned resolution</th></tr>
+  <tr><td>Mock idempotency map is in-memory</td><td>Dedup state lost on JVM restart</td><td>Real vendor enforces idempotency server-side</td></tr>
+  <tr><td>No client-level idempotency</td><td>Two identical /send calls = two SMS</td><td>Client-supplied idempotency key on the request</td></tr>
+  <tr><td>Single partition &amp; replica</td><td>No consumer scaling; broker crash loses data</td><td>3 replicas, N partitions, min.insync.replicas=2</td></tr>
+  <tr><td>No producer idempotence / acks=all</td><td>Lost ack can duplicate at the source</td><td>enable.idempotence=true + acks=all</td></tr>
+  <tr><td>Unbounded history query</td><td>Large result sets load fully into memory</td><td>Pagination (page/limit) + index on phoneNumber</td></tr>
+  <tr><td>Shared admin key</td><td>No per-user identity; can't ship to many sellers</td><td>Per-seller keys + tenant isolation (Twilio/Stripe model)</td></tr>
+  <tr><td>No outbox retention</td><td>PUBLISHED rows accumulate forever</td><td>Scheduled archival/cleanup job</td></tr>
+</table>
+<p class="small">
+  All open items are configuration or additive changes — none require re-architecting the core. The
+  outbox foundation, the idempotency chain, and the public/admin split are production-shaped.
+</p>
+
+<!-- ═══════════════════ 15 ═══════════════════ -->
+<h1>15. Appendix &amp; Glossary</h1>
+<table>
+  <tr><th>Term</th><th>Meaning</th></tr>
+  <tr><td>Outbox pattern</td><td>Persist intent to a local table first, then process asynchronously, so acceptance is decoupled from work and nothing is lost.</td></tr>
+  <tr><td>Idempotency key</td><td>A stable per-request id ensuring a repeated operation has the same effect as doing it once.</td></tr>
+  <tr><td>At-least-once delivery</td><td>Kafka's guarantee that a message is delivered one or more times — consumers must be idempotent.</td></tr>
+  <tr><td>Dead-letter</td><td>A terminal FAILED state for messages that exhaust retries, set aside for inspection/replay.</td></tr>
+  <tr><td>Consumer group</td><td>A named set of consumers sharing a topic's partitions and tracking processed offsets together.</td></tr>
+  <tr><td>Backoff</td><td>Increasing the delay between retries to ride out transient outages.</td></tr>
+</table>
+
+<div class="callout">
+  <strong>Summary.</strong> A two-service, event-driven SMS platform whose transactional outbox makes
+  acceptance durable and decoupled, whose end-to-end idempotency chain guarantees exactly-once delivery
+  to both the recipient and the store, and whose dead-letter queue and API-key gate make it operable and
+  protected. The remaining work is scaling and multi-tenancy — the foundation is sound.
+</div>
+
+</body>
+</html>

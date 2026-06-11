@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Distributed SMS Service</title>
+<style>
+:root {
+  --bg:        #0d1117;
+  --surface:   #161b22;
+  --surface2:  #21262d;
+  --border:    #30363d;
+  --primary:   #58a6ff;
+  --primary-d: #1f4a8c;
+  --success:   #3fb950;
+  --success-d: #0d2818;
+  --danger:    #f85149;
+  --danger-d:  #2d0b0b;
+  --warn:      #d29922;
+  --warn-d:    #2d1f07;
+  --cyan:      #39c5cf;
+  --cyan-d:    #07292b;
+  --text:      #e6edf3;
+  --muted:     #8b949e;
+  --radius:    8px;
+  --font:      -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --mono:      'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; min-height: 100vh; }
+
+/* ── Header ── */
+header {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 20;
+}
+.logo { font-size: 16px; font-weight: 600; letter-spacing: -0.3px; display: flex; align-items: center; gap: 10px; }
+.service-badges { display: flex; gap: 10px; }
+.badge {
+  display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px;
+  font-size: 12px; font-weight: 500; border: 1px solid var(--border); background: var(--surface2); transition: all .3s;
+}
+.badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); transition: background .3s; }
+.badge.up { border-color: var(--success); background: var(--success-d); }
+.badge.up .dot { background: var(--success); box-shadow: 0 0 6px var(--success); }
+.badge.down { border-color: var(--danger); background: var(--danger-d); }
+.badge.down .dot { background: var(--danger); }
+
+/* ── Architecture pipeline strip ── */
+.pipeline {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 14px 24px; display: flex; align-items: center; justify-content: center;
+  gap: 6px; flex-wrap: wrap; overflow-x: auto;
+}
+.node {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg); min-width: 78px; position: relative; transition: all .3s;
+}
+.node .node-icon { font-size: 16px; line-height: 1; }
+.node .node-label { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.node.healthy { border-color: var(--success); }
+.node.healthy .node-label { color: var(--success); }
+.node.unhealthy { border-color: var(--danger); }
+.node.unhealthy .node-label { color: var(--danger); }
+.node.pulse { animation: pulse 1s ease-out; }
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(88,166,255,.5); border-color: var(--primary); }
+  100% { box-shadow: 0 0 0 12px rgba(88,166,255,0); }
+}
+.node-badge {
+  position: absolute; top: -8px; right: -8px; min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 9px; background: var(--warn); color: #0d1117; font-size: 11px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; border: 2px solid var(--surface);
+}
+.arrow { color: var(--muted); font-size: 16px; flex-shrink: 0; }
+
+/* ── Tab nav ── */
+.tab-nav { display: flex; border-bottom: 1px solid var(--border); padding: 0 24px; background: var(--surface); gap: 4px; position: sticky; top: 56px; z-index: 19; }
+.tab-btn {
+  padding: 12px 16px; background: none; border: none; color: var(--muted); cursor: pointer;
+  font-size: 14px; font-family: var(--font); border-bottom: 2px solid transparent; margin-bottom: -1px;
+  transition: color .2s, border-color .2s; display: flex; align-items: center; gap: 7px;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+.tab-btn .count-chip { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; font-size: 11px; padding: 0 6px; color: var(--muted); }
+
+/* ── Main ── */
+.main { max-width: 1000px; margin: 0 auto; padding: 28px 24px; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ── Cards ── */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+.card-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 16px; }
+
+/* ── Form ── */
+.form-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.form-group { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.form-group label { font-size: 12px; color: var(--muted); font-weight: 500; }
+input[type="text"], input[type="tel"], textarea {
+  background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px;
+  padding: 8px 12px; font-size: 14px; font-family: var(--font); width: 100%; transition: border-color .2s; outline: none;
+}
+input:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(88,166,255,.15); }
+textarea { resize: vertical; min-height: 80px; }
+.char-counter { font-size: 11px; color: var(--muted); text-align: right; margin-top: 4px; }
+
+/* ── Buttons ── */
+.btn {
+  padding: 8px 16px; border-radius: 6px; border: 1px solid transparent; cursor: pointer;
+  font-size: 13px; font-weight: 500; font-family: var(--font); transition: opacity .15s, transform .1s;
+  white-space: nowrap; display: inline-flex; align-items: center; gap: 6px;
+}
+.btn:active { transform: scale(.97); }
+.btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.btn-primary { background: var(--primary); color: #0d1117; border-color: var(--primary); }
+.btn-danger  { background: var(--danger); color: #fff; border-color: var(--danger); }
+.btn-success { background: var(--success); color: #0d1117; border-color: var(--success); }
+.btn-warn    { background: var(--warn); color: #0d1117; border-color: var(--warn); }
+.btn-outline { background: transparent; color: var(--text); border-color: var(--border); }
+.btn-outline:hover { border-color: var(--text); }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+
+/* ── Chips ── */
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.chip {
+  padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface2);
+  cursor: pointer; font-size: 12px; color: var(--muted); transition: all .2s; display: flex; align-items: center; gap: 5px;
+}
+.chip:hover { border-color: var(--primary); color: var(--primary); }
+.chip.selected { border-color: var(--primary); color: var(--primary); background: var(--primary-d); }
+
+/* ── Result boxes ── */
+.result-box { border-radius: var(--radius); padding: 14px 16px; margin-top: 16px; display: none; border: 1px solid var(--border); }
+.result-box.visible { display: block; }
+.result-box.success { background: var(--success-d); border-color: var(--success); }
+.result-box.danger  { background: var(--danger-d); border-color: var(--danger); }
+.result-box.warn    { background: var(--warn-d); border-color: var(--warn); }
+.result-box.info    { background: var(--cyan-d); border-color: var(--cyan); }
+.result-box .result-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+.result-box.success .result-title { color: var(--success); }
+.result-box.danger .result-title { color: var(--danger); }
+.result-box.warn .result-title { color: var(--warn); }
+.result-box.info .result-title { color: var(--cyan); }
+.kv-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; font-size: 13px; }
+.kv-key { color: var(--muted); white-space: nowrap; }
+.kv-val { color: var(--text); word-break: break-all; font-family: var(--mono); font-size: 12px; }
+
+/* ── Status summary cards ── */
+.summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+.summary-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; border-left-width: 3px; }
+.summary-card .num { font-size: 26px; font-weight: 700; line-height: 1; }
+.summary-card .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-top: 6px; }
+.summary-card.pending   { border-left-color: var(--warn); }
+.summary-card.pending   .num { color: var(--warn); }
+.summary-card.sent      { border-left-color: var(--cyan); }
+.summary-card.sent      .num { color: var(--cyan); }
+.summary-card.published { border-left-color: var(--success); }
+.summary-card.published .num { color: var(--success); }
+.summary-card.failed    { border-left-color: var(--danger); }
+.summary-card.failed    .num { color: var(--danger); }
+@media (max-width: 700px) { .summary-grid { grid-template-columns: repeat(2, 1fr); } }
+
+/* ── Table ── */
+.tbl-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th {
+  background: var(--surface2); padding: 10px 14px; text-align: left; font-weight: 600; color: var(--muted);
+  font-size: 11px; text-transform: uppercase; letter-spacing: .5px; border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+tbody tr { border-bottom: 1px solid var(--border); transition: background .15s; }
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: var(--surface2); }
+tbody td { padding: 10px 14px; vertical-align: top; }
+.td-mono { font-family: var(--mono); font-size: 12px; }
+
+/* ── Status pills ── */
+.pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.pill-pending   { background: var(--warn-d); color: var(--warn); border: 1px solid var(--warn); }
+.pill-sent      { background: var(--cyan-d); color: var(--cyan); border: 1px solid var(--cyan); }
+.pill-published { background: var(--success-d); color: var(--success); border: 1px solid var(--success); }
+.pill-failed    { background: var(--danger-d); color: var(--danger); border: 1px solid var(--danger); }
+.pill-success   { background: var(--success-d); color: var(--success); border: 1px solid var(--success); }
+.pill-vfailed   { background: var(--danger-d); color: var(--danger); border: 1px solid var(--danger); }
+
+/* ── Empty state ── */
+.empty { text-align: center; padding: 48px 24px; color: var(--muted); }
+.empty p { font-size: 13px; margin-top: 10px; }
+
+/* ── Two-col ── */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 640px) { .two-col { grid-template-columns: 1fr; } .form-row { flex-direction: column; } }
+
+/* ── Activity log ── */
+.activity-list { list-style: none; max-height: 220px; overflow-y: auto; }
+.activity-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.activity-item:last-child { border-bottom: none; }
+.activity-icon { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; margin-top: 1px; }
+.activity-icon.block { background: var(--danger-d); color: var(--danger); }
+.activity-icon.unblock { background: var(--success-d); color: var(--success); }
+.activity-icon.check { background: var(--primary-d); color: var(--primary); }
+.activity-meta { color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+/* ── Toggle ── */
+.toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-track { position: absolute; inset: 0; background: var(--border); border-radius: 10px; cursor: pointer; transition: background .2s; }
+.toggle input:checked + .toggle-track { background: var(--success); }
+.toggle-track::after { content: ''; position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .2s; }
+.toggle input:checked + .toggle-track::after { transform: translateX(16px); }
+
+/* ── Spinner ── */
+.spinner { width: 13px; height: 13px; border: 2px solid transparent; border-top-color: currentColor; border-radius: 50%; display: inline-block; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Page header ── */
+.page-header { margin-bottom: 20px; }
+.page-header h2 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+.page-header p { color: var(--muted); font-size: 13px; }
+
+/* ── Live indicator ── */
+.live-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); animation: blink 1.4s infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+
+/* ── Toast ── */
+#toast { position: fixed; bottom: 24px; right: 24px; z-index: 50; display: flex; flex-direction: column; gap: 8px; }
+.toast-item { background: var(--surface2); border: 1px solid var(--border); border-left-width: 3px; border-radius: 6px; padding: 10px 14px; font-size: 13px; min-width: 220px; box-shadow: 0 6px 20px rgba(0,0,0,.4); animation: slidein .25s ease; }
+.toast-item.ok { border-left-color: var(--success); }
+.toast-item.err { border-left-color: var(--danger); }
+@keyframes slidein { from { transform: translateX(20px); opacity: 0; } }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ HEADER ═══════════════ -->
+<header>
+  <div class="logo">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+    </svg>
+    Distributed SMS Service
+  </div>
+  <div class="service-badges">
+    <div class="badge" id="badge-sender"><span class="dot"></span>Java Sender</div>
+    <div class="badge" id="badge-store"><span class="dot"></span>Go Store</div>
+  </div>
+</header>
+
+<!-- ═══════════════ ARCHITECTURE PIPELINE ═══════════════ -->
+<div class="pipeline" id="pipeline">
+  <div class="node" id="node-client"><span class="node-icon">🖥️</span><span class="node-label">Client</span></div>
+  <span class="arrow">→</span>
+  <div class="node" id="node-java"><span class="node-icon">☕</span><span class="node-label">Java Sender</span></div>
+  <span class="arrow">→</span>
+  <div class="node" id="node-outbox"><span class="node-icon">📦</span><span class="node-label">Outbox DB</span></div>
+  <span class="arrow">→</span>
+  <div class="node" id="node-kafka"><span class="node-icon">🔀</span><span class="node-label">Kafka</span></div>
+  <span class="arrow">→</span>
+  <div class="node" id="node-go"><span class="node-icon">🐹</span><span class="node-label">Go Store</span></div>
+  <span class="arrow">→</span>
+  <div class="node" id="node-mongo"><span class="node-icon">🍃</span><span class="node-label">MongoDB</span></div>
+</div>
+
+<!-- ═══════════════ TAB NAV ═══════════════ -->
+<nav class="tab-nav">
+  <button class="tab-btn active" data-tab="send">📨 Send SMS</button>
+  <button class="tab-btn" data-tab="outbox">📦 Outbox Monitor <span class="count-chip" id="outbox-tab-count">0</span></button>
+  <button class="tab-btn" data-tab="blocklist">🚫 Blocklist</button>
+  <button class="tab-btn" data-tab="history">📜 History</button>
+</nav>
+
+<div class="main">
+
+  <!-- ════ SEND ════ -->
+  <div id="tab-send" class="tab-panel active">
+    <div class="page-header">
+      <h2>Send SMS</h2>
+      <p>The request is accepted instantly and durably queued in the outbox — delivery happens asynchronously. Watch it in the Outbox Monitor.</p>
+    </div>
+    <div class="card">
+      <div class="card-title">Quick-select demo numbers</div>
+      <div class="chips">
+        <div class="chip" data-phone="8888888888"><span style="color:var(--success)">✓</span> 8888888888 <span style="color:var(--muted);font-size:10px">(vendor succeeds)</span></div>
+        <div class="chip" data-phone="9999999999"><span style="color:var(--danger)">✕</span> 9999999999 <span style="color:var(--muted);font-size:10px">(vendor fails)</span></div>
+        <div class="chip" data-phone="7777777777"><span style="color:var(--warn)">⊘</span> 7777777777 <span style="color:var(--muted);font-size:10px">(block to test)</span></div>
+      </div>
+      <div class="form-group" style="margin-bottom:14px">
+        <label>Phone Number</label>
+        <input type="tel" id="send-phone" placeholder="e.g. 8888888888" maxlength="15">
+      </div>
+      <div class="form-group" style="margin-bottom:4px">
+        <label>Message</label>
+        <textarea id="send-message" placeholder="Type your message here…" maxlength="160"></textarea>
+      </div>
+      <div class="char-counter"><span id="char-count">0</span> / 160</div>
+      <div style="margin-top:16px">
+        <button class="btn btn-primary" id="send-btn" style="width:100%;justify-content:center">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          Send Message
+        </button>
+      </div>
+      <div id="send-result" class="result-box">
+        <div class="result-title" id="send-result-title"></div>
+        <div class="kv-grid" id="send-result-kv"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ OUTBOX MONITOR ════ -->
+  <div id="tab-outbox" class="tab-panel">
+    <div class="page-header">
+      <h2>Outbox Monitor</h2>
+      <p>Every request flows <strong>PENDING → SENT → PUBLISHED</strong>. A row that exhausts its retries is dead-lettered as <strong>FAILED</strong> and can be replayed.</p>
+    </div>
+
+    <div class="summary-grid">
+      <div class="summary-card pending"><div class="num" id="cnt-pending">0</div><div class="lbl">Pending</div></div>
+      <div class="summary-card sent"><div class="num" id="cnt-sent">0</div><div class="lbl">Sent (vendor done)</div></div>
+      <div class="summary-card published"><div class="num" id="cnt-published">0</div><div class="lbl">Published</div></div>
+      <div class="summary-card failed"><div class="num" id="cnt-failed">0</div><div class="lbl">Dead-lettered</div></div>
+    </div>
+
+    <div class="card">
+      <div class="live-row">
+        <span class="live-dot"></span>
+        <span style="font-size:12px;color:var(--muted)">Live — auto-refreshing every 2s</span>
+        <span id="outbox-updated" style="font-size:11px;color:var(--muted);margin-left:auto"></span>
+      </div>
+      <div id="outbox-result"></div>
+    </div>
+  </div>
+
+  <!-- ════ BLOCKLIST ════ -->
+  <div id="tab-blocklist" class="tab-panel">
+    <div class="page-header">
+      <h2>Blocklist Manager</h2>
+      <p>Check, block, or unblock phone numbers via Redis. Blocked numbers are rejected at send time — they never reach the outbox.</p>
+    </div>
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title">Check Status</div>
+        <div class="form-group" style="margin-bottom:12px">
+          <label>Phone Number</label>
+          <input type="tel" id="check-phone" placeholder="e.g. 7777777777" maxlength="15">
+        </div>
+        <button class="btn btn-outline" id="check-btn" style="width:100%;justify-content:center">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Check
+        </button>
+        <div id="check-result" class="result-box"><div class="result-title" id="check-result-title"></div><div class="kv-grid" id="check-result-kv"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Block / Unblock</div>
+        <div class="form-group" style="margin-bottom:12px">
+          <label>Phone Number</label>
+          <input type="tel" id="block-phone" placeholder="Enter number to manage" maxlength="15">
+        </div>
+        <div class="form-row">
+          <button class="btn btn-danger" id="block-btn" style="flex:1;justify-content:center">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg> Block
+          </button>
+          <button class="btn btn-success" id="unblock-btn" style="flex:1;justify-content:center">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Unblock
+          </button>
+        </div>
+        <div id="block-result" class="result-box"><div class="result-title" id="block-result-title"></div><div class="kv-grid" id="block-result-kv"></div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Activity Log</div>
+      <ul class="activity-list" id="activity-list">
+        <li style="padding:24px;text-align:center;color:var(--muted);font-size:13px">No actions taken yet</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ════ HISTORY ════ -->
+  <div id="tab-history" class="tab-panel">
+    <div class="page-header">
+      <h2>Message History</h2>
+      <p>The end-state in MongoDB, served by the Go Store. An event lands here a moment after it reaches PUBLISHED in the outbox.</p>
+    </div>
+    <div class="card">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Phone Number</label>
+          <input type="tel" id="history-phone" placeholder="e.g. 8888888888" maxlength="15">
+        </div>
+        <button class="btn btn-primary" id="history-btn" style="align-self:flex-end">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Fetch
+        </button>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:14px">
+        <label class="toggle" title="Auto-refresh every 3 seconds"><input type="checkbox" id="auto-refresh-toggle"><span class="toggle-track"></span></label>
+        <span style="font-size:12px;color:var(--muted)">Auto-refresh every 3s</span>
+        <span id="refresh-indicator" style="font-size:11px;color:var(--muted);margin-left:auto"></span>
+      </div>
+    </div>
+    <div id="history-result"></div>
+  </div>
+
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ════════════════════════════════════════════════════════════════════
+// API
+// ════════════════════════════════════════════════════════════════════
+const API = {
+  healthSender: () => fetch('/api/sender/v1/sms/health').then(r => r.ok).catch(() => false),
+  healthStore:  () => fetch('/api/store/health').then(r => r.ok).catch(() => false),
+  sendSms: (phoneNumber, message) => fetch('/api/sender/v1/sms/send', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phoneNumber, message }),
+  }),
+  checkBlocked: p => fetch(`/api/sender/v1/sms/block/${encodeURIComponent(p)}`),
+  blockUser:    p => fetch(`/api/sender/v1/sms/block/${encodeURIComponent(p)}`, { method: 'POST' }),
+  unblockUser:  p => fetch(`/api/sender/v1/sms/block/${encodeURIComponent(p)}`, { method: 'DELETE' }),
+  getHistory:   p => fetch(`/api/store/v1/user/${encodeURIComponent(p)}/messages`),
+  listOutbox:   () => fetch('/api/sender/v1/sms/outbox'),
+  replayOutbox: id => fetch(`/api/sender/v1/sms/outbox/${encodeURIComponent(id)}/replay`, { method: 'POST' }),
+};
+
+// ════════════════════════════════════════════════════════════════════
+// Helpers
+// ════════════════════════════════════════════════════════════════════
+function $(id) { return document.getElementById(id); }
+function setLoading(btn, on) {
+  if (on) { btn._orig = btn.innerHTML; btn.innerHTML = '<span class="spinner"></span> …'; btn.disabled = true; }
+  else { btn.innerHTML = btn._orig; btn.disabled = false; }
+}
+function showResult(boxId, titleId, kvId, type, title, pairs) {
+  const box = $(boxId);
+  box.className = 'result-box visible ' + type;
+  $(titleId).textContent = title;
+  $(kvId).innerHTML = pairs.map(([k, v]) => `<span class="kv-key">${k}</span><span class="kv-val">${v}</span>`).join('');
+}
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function toast(msg, ok) {
+  const el = document.createElement('div');
+  el.className = 'toast-item ' + (ok ? 'ok' : 'err');
+  el.textContent = msg;
+  $('toast').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+function pulse(nodeId) {
+  const n = $(nodeId);
+  n.classList.remove('pulse'); void n.offsetWidth; n.classList.add('pulse');
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Health + pipeline
+// ════════════════════════════════════════════════════════════════════
+async function pollHealth() {
+  const [senderUp, storeUp] = await Promise.all([API.healthSender(), API.healthStore()]);
+  setBadge('badge-sender', senderUp); setBadge('badge-store', storeUp);
+  setNode('node-java', senderUp); setNode('node-go', storeUp);
+}
+function setBadge(id, up) { const el = $(id); el.classList.toggle('up', up); el.classList.toggle('down', !up); }
+function setNode(id, up) { const el = $(id); el.classList.toggle('healthy', up); el.classList.toggle('unhealthy', !up); }
+pollHealth(); setInterval(pollHealth, 5000);
+
+// ════════════════════════════════════════════════════════════════════
+// Tabs
+// ════════════════════════════════════════════════════════════════════
+let activeTab = 'send';
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    activeTab = btn.dataset.tab;
+    $('tab-' + activeTab).classList.add('active');
+    if (activeTab === 'outbox') refreshOutbox();
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Send
+// ════════════════════════════════════════════════════════════════════
+$('send-message').addEventListener('input', function () { $('char-count').textContent = this.value.length; });
+document.querySelectorAll('.chip[data-phone]').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+    chip.classList.add('selected');
+    $('send-phone').value = chip.dataset.phone;
+  });
+});
+$('send-btn').addEventListener('click', async () => {
+  const phone = $('send-phone').value.trim();
+  const msg = $('send-message').value.trim();
+  if (!phone) { alert('Enter a phone number.'); return; }
+  if (!msg) { alert('Enter a message.'); return; }
+  const btn = $('send-btn'); setLoading(btn, true);
+  const t0 = Date.now();
+  try {
+    const res = await API.sendSms(phone, msg);
+    const data = await res.json();
+    const ms = Date.now() - t0;
+    if (res.status === 202) {
+      pulse('node-client'); pulse('node-java'); pulse('node-outbox');
+      showResult('send-result', 'send-result-title', 'send-result-kv', 'info', 'Accepted — queued in outbox', [
+        ['Request ID', data.messageId || '—'],
+        ['Status', data.status],
+        ['API latency', ms + ' ms (just a DB write — no vendor/Kafka on this path)'],
+        ['What next', 'Open the Outbox Monitor to watch PENDING → SENT → PUBLISHED'],
+      ]);
+      refreshOutbox();
+    } else if (res.status === 403) {
+      showResult('send-result', 'send-result-title', 'send-result-kv', 'danger', 'Blocked — not queued', [
+        ['HTTP', res.status + ' ' + res.statusText],
+        ['Reason', data.message || data.error || 'Blocked'],
+      ]);
+    } else {
+      showResult('send-result', 'send-result-title', 'send-result-kv', 'danger', 'Error ' + res.status, [
+        ['HTTP', res.status + ' ' + res.statusText],
+        ['Reason', data.message || (data.validationErrors ? JSON.stringify(data.validationErrors) : data.error) || 'Error'],
+      ]);
+    }
+  } catch (err) {
+    showResult('send-result', 'send-result-title', 'send-result-kv', 'danger', 'Network error', [['Error', err.message]]);
+  } finally { setLoading(btn, false); }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Outbox Monitor
+// ════════════════════════════════════════════════════════════════════
+function pillFor(status) {
+  const map = { PENDING: 'pill-pending', SENT: 'pill-sent', PUBLISHED: 'pill-published', FAILED: 'pill-failed' };
+  return `<span class="pill ${map[status] || ''}">${status}</span>`;
+}
+async function refreshOutbox() {
+  try {
+    const res = await API.listOutbox();
+    const rows = await res.json();
+    renderOutbox(Array.isArray(rows) ? rows : []);
+    $('outbox-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  } catch (err) {
+    $('outbox-result').innerHTML = `<div class="empty"><p>Could not reach the Java Sender. Is it running?</p></div>`;
+  }
+}
+function renderOutbox(rows) {
+  const counts = { PENDING: 0, SENT: 0, PUBLISHED: 0, FAILED: 0 };
+  rows.forEach(r => { if (counts[r.status] !== undefined) counts[r.status]++; });
+  $('cnt-pending').textContent = counts.PENDING;
+  $('cnt-sent').textContent = counts.SENT;
+  $('cnt-published').textContent = counts.PUBLISHED;
+  $('cnt-failed').textContent = counts.FAILED;
+
+  const inFlight = counts.PENDING + counts.SENT;
+  $('outbox-tab-count').textContent = rows.length;
+  const outboxNode = $('node-outbox');
+  let badge = outboxNode.querySelector('.node-badge');
+  if (inFlight > 0) {
+    if (!badge) { badge = document.createElement('span'); badge.className = 'node-badge'; outboxNode.appendChild(badge); }
+    badge.textContent = inFlight;
+  } else if (badge) { badge.remove(); }
+
+  if (rows.length === 0) {
+    $('outbox-result').innerHTML = `<div class="empty"><p>No outbox rows yet</p><p style="font-size:12px">Send an SMS to see it flow through the pipeline.</p></div>`;
+    return;
+  }
+  const trs = rows.map(r => {
+    const vendorPill = r.vendorStatus
+      ? `<span class="pill ${r.vendorStatus === 'SUCCESS' ? 'pill-success' : 'pill-vfailed'}">${r.vendorStatus}</span>`
+      : '<span style="color:var(--muted)">—</span>';
+    const replay = r.status === 'FAILED'
+      ? `<button class="btn btn-warn btn-sm" onclick="doReplay('${r.id}')">↻ Replay</button>`
+      : '<span style="color:var(--muted)">—</span>';
+    const err = r.lastError ? `<span style="color:var(--danger);font-size:11px">${esc(r.lastError)}</span>` : '<span style="color:var(--muted)">—</span>';
+    const created = r.createdAt ? new Date(r.createdAt).toLocaleTimeString() : '—';
+    const msg = r.message && r.message.length > 28 ? r.message.slice(0, 28) + '…' : (r.message || '');
+    return `<tr>
+      <td class="td-mono" style="color:var(--muted)" title="${esc(r.id)}">${esc((r.id || '').slice(0, 8))}</td>
+      <td class="td-mono">${esc(r.phoneNumber)}</td>
+      <td title="${esc(r.message)}">${esc(msg)}</td>
+      <td>${pillFor(r.status)}</td>
+      <td>${vendorPill}</td>
+      <td style="text-align:center">${r.attempts || 0}</td>
+      <td>${err}</td>
+      <td class="td-mono" style="color:var(--muted);white-space:nowrap">${created}</td>
+      <td>${replay}</td>
+    </tr>`;
+  }).join('');
+  $('outbox-result').innerHTML = `
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>Req ID</th><th>Phone</th><th>Message</th><th>Status</th><th>Vendor</th>
+        <th>Attempts</th><th>Last Error</th><th>Created</th><th></th>
+      </tr></thead>
+      <tbody>${trs}</tbody>
+    </table></div>`;
+}
+async function doReplay(id) {
+  try {
+    const res = await API.replayOutbox(id);
+    if (res.ok) { toast('Replayed ' + id.slice(0, 8) + ' — requeued', true); pulse('node-outbox'); refreshOutbox(); }
+    else { const d = await res.json().catch(() => ({})); toast('Replay failed: ' + (d.message || res.status), false); }
+  } catch (err) { toast('Replay error: ' + err.message, false); }
+}
+window.doReplay = doReplay;
+
+// ════════════════════════════════════════════════════════════════════
+// Blocklist
+// ════════════════════════════════════════════════════════════════════
+$('check-btn').addEventListener('click', async () => {
+  const phone = $('check-phone').value.trim();
+  if (!phone) { alert('Enter a phone number.'); return; }
+  const btn = $('check-btn'); setLoading(btn, true);
+  try {
+    const res = await API.checkBlocked(phone); const data = await res.json();
+    showResult('check-result', 'check-result-title', 'check-result-kv', data.blocked ? 'danger' : 'success',
+      data.blocked ? 'Number is BLOCKED' : 'Number is NOT blocked',
+      [['Phone', data.phoneNumber], ['Status', data.blocked ? '🚫 Blocked' : '✅ Active'], ['Detail', data.message]]);
+    logActivity('check', phone, data.blocked ? 'Is blocked' : 'Not blocked');
+  } catch (err) { showResult('check-result', 'check-result-title', 'check-result-kv', 'danger', 'Error', [['Error', err.message]]); }
+  finally { setLoading(btn, false); }
+});
+async function doBlockAction(action) {
+  const phone = $('block-phone').value.trim();
+  if (!phone) { alert('Enter a phone number.'); return; }
+  const btn = $(action + '-btn'); setLoading(btn, true);
+  try {
+    const res = action === 'block' ? await API.blockUser(phone) : await API.unblockUser(phone);
+    const data = await res.json();
+    showResult('block-result', 'block-result-title', 'block-result-kv', action === 'block' ? 'danger' : 'success',
+      action === 'block' ? 'Number blocked' : 'Number unblocked', [['Phone', data.phoneNumber], ['Result', data.message]]);
+    logActivity(action, phone, data.message);
+  } catch (err) { showResult('block-result', 'block-result-title', 'block-result-kv', 'danger', 'Error', [['Error', err.message]]); }
+  finally { setLoading(btn, false); }
+}
+$('block-btn').addEventListener('click', () => doBlockAction('block'));
+$('unblock-btn').addEventListener('click', () => doBlockAction('unblock'));
+function logActivity(type, phone, detail) {
+  const list = $('activity-list');
+  const icons = { block: '🚫', unblock: '✅', check: '🔍' };
+  const labels = { block: 'Blocked', unblock: 'Unblocked', check: 'Checked' };
+  const ph = list.querySelector('li[style]'); if (ph) ph.remove();
+  const li = document.createElement('li');
+  li.className = 'activity-item';
+  li.innerHTML = `<div class="activity-icon ${type}">${icons[type]}</div><div><div><strong>${esc(phone)}</strong> — ${esc(detail)}</div><div class="activity-meta">${labels[type]} · ${new Date().toLocaleTimeString()}</div></div>`;
+  list.prepend(li);
+}
+
+// ════════════════════════════════════════════════════════════════════
+// History
+// ════════════════════════════════════════════════════════════════════
+let currentHistoryPhone = '';
+async function fetchHistory(phone) {
+  try {
+    const res = await API.getHistory(phone); const data = await res.json();
+    $('refresh-indicator').textContent = 'Updated ' + new Date().toLocaleTimeString();
+    const el = $('history-result');
+    if (!Array.isArray(data) || data.length === 0) {
+      el.innerHTML = `<div class="empty"><p>No messages found for <strong>${esc(phone)}</strong></p><p style="font-size:12px">Send an SMS, then wait for it to reach PUBLISHED in the outbox — it lands here right after.</p></div>`;
+      return;
+    }
+    const rows = data.map(ev => {
+      const ts = new Date(ev.timestamp).toLocaleString();
+      const pill = ev.status === 'SUCCESS' ? '<span class="pill pill-published">SUCCESS</span>' : '<span class="pill pill-failed">FAILED</span>';
+      const dash = '<span style="color:var(--muted)">—</span>';
+      const vid = ev.vendorMessageId ? esc(ev.vendorMessageId) : dash;
+      const err = ev.errorReason ? esc(ev.errorReason) : dash;
+      const preview = ev.message && ev.message.length > 40 ? ev.message.slice(0, 40) + '…' : (ev.message || '');
+      return `<tr><td class="td-mono" style="color:var(--muted);font-size:11px;white-space:nowrap">${ts}</td><td>${pill}</td><td title="${esc(ev.message)}">${esc(preview)}</td><td class="td-mono">${vid}</td><td style="color:var(--danger);font-size:12px">${err}</td></tr>`;
+    }).join('');
+    el.innerHTML = `<div style="margin-bottom:10px;color:var(--muted);font-size:12px">${data.length} event${data.length !== 1 ? 's' : ''} for <strong style="color:var(--text)">${esc(phone)}</strong></div><div class="tbl-wrap"><table><thead><tr><th>Timestamp</th><th>Status</th><th>Message</th><th>Vendor ID</th><th>Error</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  } catch (err) {
+    $('history-result').innerHTML = `<div class="card" style="border-color:var(--danger);color:var(--danger)">Error: ${esc(err.message)}</div>`;
+  }
+}
+$('history-btn').addEventListener('click', () => {
+  const phone = $('history-phone').value.trim();
+  if (!phone) { alert('Enter a phone number.'); return; }
+  currentHistoryPhone = phone; fetchHistory(phone);
+});
+$('history-phone').addEventListener('keydown', e => { if (e.key === 'Enter') $('history-btn').click(); });
+$('auto-refresh-toggle').addEventListener('change', function () {
+  if (this.checked && !currentHistoryPhone) { this.checked = false; alert('Fetch a number first, then enable auto-refresh.'); }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// Global 2s tick — keeps the outbox monitor + pipeline badge live
+// ════════════════════════════════════════════════════════════════════
+setInterval(() => {
+  if (activeTab === 'outbox') refreshOutbox();
+  else refreshOutboxBadgeOnly();
+  if (activeTab === 'history' && currentHistoryPhone && $('auto-refresh-toggle').checked) fetchHistory(currentHistoryPhone);
+}, 2000);
+
+// Keep the pipeline's in-flight badge live even when not on the outbox tab.
+async function refreshOutboxBadgeOnly() {
+  try {
+    const res = await API.listOutbox(); const rows = await res.json();
+    const inFlight = rows.filter(r => r.status === 'PENDING' || r.status === 'SENT').length;
+    $('outbox-tab-count').textContent = rows.length;
+    const node = $('node-outbox'); let badge = node.querySelector('.node-badge');
+    if (inFlight > 0) { if (!badge) { badge = document.createElement('span'); badge.className = 'node-badge'; node.appendChild(badge); } badge.textContent = inFlight; }
+    else if (badge) badge.remove();
+  } catch (e) { /* sender down — health badge already reflects it */ }
+}
+refreshOutboxBadgeOnly();
+</script>
+</body>
+</html>
